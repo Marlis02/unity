@@ -19,12 +19,12 @@ namespace CharacterPlayground
         static readonly CharacterMotion[][] MotionRows =
         {
             new[] { CharacterMotion.Idle, CharacterMotion.Walk, CharacterMotion.Run, CharacterMotion.Jump },
-            new[] { CharacterMotion.ArmsOut, CharacterMotion.ArmsForward, CharacterMotion.Squat },
+            new[] { CharacterMotion.ArmsOut, CharacterMotion.ArmsForward, CharacterMotion.Squat, CharacterMotion.Sit },
         };
         static readonly string[][] MotionTitleRows =
         {
             new[] { "Покой", "Шаг", "Бег", "Прыжок" },
-            new[] { "Руки в стороны", "Руки вперёд", "Присед" },
+            new[] { "В стороны", "Вперёд", "Присед", "Сидеть" },
         };
         static readonly float[] Speeds = { 0.25f, 0.5f, 1f };
         static readonly string[] SpeedTitles = { "0.25×", "0.5×", "1×" };

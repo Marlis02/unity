@@ -112,12 +112,21 @@ namespace CharacterPlayground
                 armSpread = 8f;
                 elbowBend = 15f;
                 lean = 20f + breath;
-                squatTarget = 1f;
-                // Keep the feet on the floor: lower the body by what the bent legs lose in height.
-                float drop = thighLength * (1f - Mathf.Cos(hip * Mathf.Deg2Rad)) + shinLength * (1f - Mathf.Cos((hip - knee) * Mathf.Deg2Rad));
-                squat = Mathf.Lerp(squat, drop, 1f - Mathf.Exp(-14f * dt));
+                squatTarget = Drop(hip, knee);
             }
-            if (squatTarget == 0f) squat = Mathf.Lerp(squat, 0f, 1f - Mathf.Exp(-14f * dt));
+            else if (motion == CharacterMotion.Sit)
+            {
+                // On a chair: thighs level, shins down, hands resting on the thighs.
+                const float hip = 90f, knee = 90f;
+                leftLegPitch = rightLegPitch = -hip;
+                leftKnee = rightKnee = knee;
+                leftArmPitch = rightArmPitch = -35f;
+                armSpread = 6f;
+                elbowBend = 45f;
+                lean = 4f + breath;
+                squatTarget = Drop(hip, knee);
+            }
+            squat = Mathf.Lerp(squat, squatTarget, 1f - Mathf.Exp(-14f * dt));
 
             SetRotation(leftArm, leftArmPitch, 0f, -armSpread, dt);
             SetRotation(rightArm, rightArmPitch, 0f, armSpread, dt);
@@ -137,6 +146,12 @@ namespace CharacterPlayground
                 p.y = bodyBaseY + bob - squat;
                 body.localPosition = p;
             }
+        }
+
+        /// <summary>How much lower the body sits when the legs bend by these angles, so the feet stay on the floor.</summary>
+        float Drop(float hip, float knee)
+        {
+            return thighLength * (1f - Mathf.Cos(hip * Mathf.Deg2Rad)) + shinLength * (1f - Mathf.Cos((hip - knee) * Mathf.Deg2Rad));
         }
 
         static void SetRotation(Transform joint, float pitch, float yaw, float roll, float dt)

@@ -1,6 +1,10 @@
 <linker>
   <!-- GameObject.CreatePrimitive adds these colliders from native code, so engine code stripping
        cannot see them being used and removes them from the WebGL build. -->
+  <!-- The skin built by CharacterImporter lives in a prefab under Resources; keep its renderer. -->
+  <assembly fullname="UnityEngine.CoreModule">
+    <type fullname="UnityEngine.SkinnedMeshRenderer" preserve="all" />
+  </assembly>
   <assembly fullname="UnityEngine.PhysicsModule">
     <type fullname="UnityEngine.BoxCollider" preserve="all" />
     <type fullname="UnityEngine.SphereCollider" preserve="all" />

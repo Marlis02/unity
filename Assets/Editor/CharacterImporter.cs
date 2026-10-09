@@ -5,6 +5,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace CharacterPlayground.EditorTools
 {
@@ -42,6 +43,8 @@ namespace CharacterPlayground.EditorTools
             public string model = "";
             [Tooltip("Body parts of a model made of separate pieces, to animate it without a skeleton.")]
             public SegmentConfig segments = new SegmentConfig();
+            [Tooltip("How far around each joint the skin bends, as a share of the joint's size; 0 turns parts like hinges.")]
+            public float softness = 0.8f;
             [Tooltip("Colours for parts of the model, e.g. when an .obj comes without its .mtl.")]
             public PartColor[] colors = new PartColor[0];
         }
@@ -421,7 +424,7 @@ namespace CharacterPlayground.EditorTools
                     gravity = config.gravity,
                 };
 
-                bool rigged = !config.segments.IsEmpty && BuildSegmentRig(root, model, config.segments, character);
+                bool rigged = !config.segments.IsEmpty && BuildSegmentRig(root, model, config.segments, character, folder, Mathf.Clamp(config.softness, 0f, 2f));
                 if (!rigged && controller == null) LogPartsHint(name, model);
 
                 Animator animator = model.GetComponentInChildren<Animator>();
@@ -488,9 +491,10 @@ namespace CharacterPlayground.EditorTools
 
         /// <summary>
         /// Regroups a model made of separate body parts under joints (waist, neck, shoulders,
-        /// elbows, hips, knees) and adds ProceduralGait to swing them.
+        /// elbows, hips, knees), melts the parts into one mesh skinned to those joints so they
+        /// bend like skin instead of turning like hinges, and adds ProceduralGait to move them.
         /// </summary>
-        static bool BuildSegmentRig(GameObject root, GameObject model, SegmentConfig segments, PlayableCharacter character)
+        static bool BuildSegmentRig(GameObject root, GameObject model, SegmentConfig segments, PlayableCharacter character, string folder, float softness)
         {
             string name = root.name;
             Dictionary<string, Transform> parts = PartsByName(model);
@@ -523,17 +527,20 @@ namespace CharacterPlayground.EditorTools
             body.SetParent(root.transform, false);
             model.transform.SetParent(body, true);
             Attach(lowerTorso, body);
+            var blends = new List<Blend>();
 
             Transform chest = null;
             if (upperTorso.Count > 0)
             {
                 Bounds upper = BoundsOf(upperTorso);
-                if (!FitCap(name, "Waist", upperTorso, upper, false, out Vector3 waist, out _))
+                if (!FitCap(name, "Waist", upperTorso, upper, false, out Vector3 waist, out float waistRadius))
                 {
                     float waistY = lowerTorso.Count > 0 ? (upper.min.y + BoundsOf(lowerTorso).max.y) * 0.5f : upper.min.y + upper.size.y * 0.15f;
                     waist = new Vector3(upper.center.x, waistY, upper.center.z);
+                    waistRadius = upper.size.z * 0.5f;
                 }
                 chest = Joint("Waist", body, waist, upperTorso);
+                blends.Add(new Blend(body, chest, waist, (upper.center - waist).normalized, waistRadius * softness, false));
             }
             Transform torso = chest != null ? chest : body;
 
@@ -546,13 +553,17 @@ namespace CharacterPlayground.EditorTools
                 neck = Joint("Neck", torso, new Vector3(main.center.x, Mathf.Min(main.min.y, headBounds.min.y), main.center.z), head);
             }
 
-            Bounds modelBounds = CharacterMetrics.CalculateBounds(model);
-            Bounds armSocket = upperTorso.Count > 0 ? BoundsOf(upperTorso) : modelBounds;
-            Bounds legSocket = lowerTorso.Count > 0 ? BoundsOf(lowerTorso) : upperTorso.Count > 0 ? BoundsOf(upperTorso) : modelBounds;
-            Transform leftShoulder = leftArm.Build(name, "Left", "Shoulder", "Elbow", torso, armSocket, out Transform leftElbow);
-            Transform rightShoulder = rightArm.Build(name, "Right", "Shoulder", "Elbow", torso, armSocket, out Transform rightElbow);
-            Transform leftHip = leftLeg.Build(name, "Left", "Hip", "Knee", body, legSocket, out Transform leftKnee);
-            Transform rightHip = rightLeg.Build(name, "Right", "Hip", "Knee", body, legSocket, out Transform rightKnee);
+            Transform leftShoulder = leftArm.Build(name, "Left", "Shoulder", "Elbow", torso, blends, softness, out Transform leftElbow);
+            Transform rightShoulder = rightArm.Build(name, "Right", "Shoulder", "Elbow", torso, blends, softness, out Transform rightElbow);
+            Transform leftHip = leftLeg.Build(name, "Left", "Hip", "Knee", body, blends, softness, out Transform leftKnee);
+            Transform rightHip = rightLeg.Build(name, "Right", "Hip", "Knee", body, blends, softness, out Transform rightKnee);
+
+            var bones = new List<Transform> { body };
+            foreach (Transform bone in new[] { chest, neck, leftShoulder, leftElbow, rightShoulder, rightElbow, leftHip, leftKnee, rightHip, rightKnee })
+            {
+                if (bone != null) bones.Add(bone);
+            }
+            BuildSkin(name, folder, root, bones, blends);
 
             float hipHeight = Mathf.Max(leftHip != null ? leftHip.position.y : 0f, rightHip != null ? rightHip.position.y : 0f);
             var gait = root.AddComponent<ProceduralGait>();
@@ -570,6 +581,177 @@ namespace CharacterPlayground.EditorTools
             gait.rightShin = rightKnee;
             gait.strideLength = Mathf.Max(0.2f, hipHeight * 1.4f);
             return true;
+        }
+
+        /// <summary>
+        /// A joint where skin weights pass from one bone to the next along the limb: a vertex
+        /// on the body side of the zone follows the parent bone, one past the zone follows the
+        /// child, and in between the weight changes smoothly.
+        /// </summary>
+        class Blend
+        {
+            public readonly Transform parent;
+            public readonly Transform child;
+            public readonly Vector3 pivot;
+            public readonly Vector3 axis;      // unit vector from the pivot into the child piece
+            public readonly float halfWidth;   // half the length of the zone along the axis
+            public readonly bool parentSide;   // vertices of the parent bone's piece blend too (an upper arm towards its elbow)
+
+            public Blend(Transform parent, Transform child, Vector3 pivot, Vector3 axis, float halfWidth, bool parentSide)
+            {
+                this.parent = parent;
+                this.child = child;
+                this.pivot = pivot;
+                this.axis = axis;
+                this.halfWidth = Mathf.Max(0.01f, halfWidth);
+                this.parentSide = parentSide;
+            }
+
+            /// <summary>Share of the child bone at a point: 0 before the zone, 1 past it.</summary>
+            public float ChildShare(Vector3 point)
+            {
+                float t = Mathf.Clamp01((Vector3.Dot(point - pivot, axis) + halfWidth) / (2f * halfWidth));
+                return t * t * (3f - 2f * t);
+            }
+        }
+
+        /// <summary>
+        /// Melts the body parts into one mesh skinned to the joints. Every vertex follows the bone
+        /// of its own part, except near a joint, where its weight passes smoothly to the next bone
+        /// over a zone about as long as the joint is round. Pieces nested inside each other are
+        /// moved by the same rule, so they bend together and nothing shows through.
+        /// </summary>
+        static void BuildSkin(string character, string folder, GameObject root, List<Transform> bones, List<Blend> blends)
+        {
+            var vertices = new List<Vector3>();
+            var normals = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var weights = new List<BoneWeight>();
+            var materials = new List<Material>();
+            var triangles = new List<List<int>>();
+            var parts = new List<GameObject>();
+
+            foreach (MeshFilter filter in root.GetComponentsInChildren<MeshFilter>(true))
+            {
+                Mesh source = filter.sharedMesh;
+                var renderer = filter.GetComponent<MeshRenderer>();
+                if (source == null || renderer == null || renderer.sharedMaterials.Length == 0) continue;
+                parts.Add(filter.gameObject);
+                Transform home = HomeBone(filter.transform, bones);
+                Matrix4x4 toWorld = filter.transform.localToWorldMatrix; // the root sits at the origin, so world is root space
+                int offset = vertices.Count;
+                Vector3[] v = source.vertices;
+                Vector3[] n = source.normals;
+                Vector2[] uv = source.uv;
+                for (int i = 0; i < v.Length; i++)
+                {
+                    Vector3 p = toWorld.MultiplyPoint3x4(v[i]);
+                    vertices.Add(p);
+                    normals.Add(n.Length == v.Length ? toWorld.MultiplyVector(n[i]).normalized : Vector3.up);
+                    uvs.Add(uv.Length == v.Length ? uv[i] : Vector2.zero);
+                    weights.Add(Weights(p, home, bones, blends));
+                }
+                for (int sub = 0; sub < source.subMeshCount; sub++)
+                {
+                    Material material = renderer.sharedMaterials[Mathf.Min(sub, renderer.sharedMaterials.Length - 1)];
+                    int slot = materials.IndexOf(material);
+                    if (slot < 0)
+                    {
+                        slot = materials.Count;
+                        materials.Add(material);
+                        triangles.Add(new List<int>());
+                    }
+                    foreach (int index in source.GetTriangles(sub)) triangles[slot].Add(index + offset);
+                }
+            }
+            if (vertices.Count == 0) return;
+
+            var mesh = new Mesh { name = character + " skin" };
+            if (vertices.Count > 65535) mesh.indexFormat = IndexFormat.UInt32;
+            mesh.SetVertices(vertices);
+            mesh.SetNormals(normals);
+            mesh.SetUVs(0, uvs);
+            mesh.boneWeights = weights.ToArray();
+            mesh.bindposes = bones.Select(bone => bone.worldToLocalMatrix).ToArray();
+            mesh.subMeshCount = materials.Count;
+            for (int i = 0; i < materials.Count; i++) mesh.SetTriangles(triangles[i], i);
+            mesh.RecalculateBounds();
+
+            string generated = folder + "/" + GeneratedFolderName;
+            EnsureFolder(generated);
+            string path = $"{generated}/{character}-skin.asset";
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(mesh, path);
+
+            var skin = new GameObject("Skin");
+            skin.transform.SetParent(root.transform, false);
+            var skinned = skin.AddComponent<SkinnedMeshRenderer>();
+            skinned.sharedMesh = mesh;
+            skinned.bones = bones.ToArray();
+            skinned.rootBone = bones[0];
+            skinned.sharedMaterials = materials.ToArray();
+            skinned.updateWhenOffscreen = true;
+            skinned.localBounds = mesh.bounds;
+
+            foreach (GameObject part in parts) UnityEngine.Object.DestroyImmediate(part);
+            string zones = string.Join(", ", blends.Select(b => $"{b.child.name} {b.halfWidth * 2f:0.00} м"));
+            Debug.Log($"[Playground] {character}: кожа из {vertices.Count} вершин на {bones.Count} костях; зоны сгиба: {zones}");
+        }
+
+        /// <summary>The bone a part is attached to: its nearest ancestor among the bones.</summary>
+        static Transform HomeBone(Transform part, List<Transform> bones)
+        {
+            for (Transform t = part; t != null; t = t.parent)
+            {
+                if (bones.Contains(t)) return t;
+            }
+            return bones[0];
+        }
+
+        static BoneWeight Weights(Vector3 point, Transform home, List<Transform> bones, List<Blend> blends)
+        {
+            var share = new Dictionary<Transform, float>();
+            float remaining = 1f;
+            foreach (Blend blend in blends)
+            {
+                if (blend.child == home)
+                {
+                    float child = blend.ChildShare(point);
+                    Add(share, blend.parent, remaining * (1f - child));
+                    remaining *= child;
+                }
+                else if (blend.parentSide && blend.parent == home)
+                {
+                    float child = blend.ChildShare(point);
+                    Add(share, blend.child, remaining * child);
+                    remaining *= 1f - child;
+                }
+            }
+            Add(share, home, remaining);
+
+            List<KeyValuePair<Transform, float>> strongest = share.OrderByDescending(s => s.Value).Take(4).ToList();
+            float total = strongest.Sum(s => s.Value);
+            var result = new BoneWeight();
+            for (int i = 0; i < strongest.Count; i++)
+            {
+                int index = bones.IndexOf(strongest[i].Key);
+                float value = strongest[i].Value / total;
+                switch (i)
+                {
+                    case 0: result.boneIndex0 = index; result.weight0 = value; break;
+                    case 1: result.boneIndex1 = index; result.weight1 = value; break;
+                    case 2: result.boneIndex2 = index; result.weight2 = value; break;
+                    default: result.boneIndex3 = index; result.weight3 = value; break;
+                }
+            }
+            return result;
+        }
+
+        static void Add(Dictionary<Transform, float> share, Transform bone, float value)
+        {
+            if (value <= 0f) return;
+            share.TryGetValue(bone, out float current);
+            share[bone] = current + value;
         }
 
         /// <summary>An arm or a leg: upper piece, lower piece and hand or foot.</summary>
@@ -591,10 +773,10 @@ namespace CharacterPlayground.EditorTools
 
             /// <summary>
             /// Creates the root joint (shoulder or hip) and, with a lower piece, the middle joint
-            /// (elbow or knee). Each joint sits at the centre of the rounded cap on top of the piece
-            /// it moves, so the cap turns in its socket instead of swinging out of it.
+            /// (elbow or knee), each at the centre of the rounded end of the piece it moves, and
+            /// records the skin blend zone of each joint, as long as that end is round.
             /// </summary>
-            public Transform Build(string character, string side, string rootName, string middleName, Transform parent, Bounds socket, out Transform middle)
+            public Transform Build(string character, string side, string rootName, string middleName, Transform parent, List<Blend> blends, float softness, out Transform middle)
             {
                 middle = null;
                 if (IsEmpty) return null;
@@ -608,31 +790,25 @@ namespace CharacterPlayground.EditorTools
                     rootRadius = thickness * 0.5f;
                 }
                 Transform rootJoint = Joint(side + rootName, parent, rootPosition, top);
-                // A thigh's chamfered top shows behind the hip when the leg swings; a smooth roller hides it.
-                // A shoulder's dome is flat on the side that rests against the torso, and that flat side turns
-                // out into the armpit when the arm lifts; a ball around the dome keeps the shoulder round.
-                CapExtents(top, topBounds, true, out float topWidth, out float topDepth, out float topEndWidth);
-                if (topEndWidth >= topWidth * 0.8f) AddRoller(character, side + rootName, rootJoint, rootPosition, rootRadius, top, topWidth, topDepth, topEndWidth, topWidth, topDepth);
-                else AddBall(character, side + rootName, rootJoint, rootPosition, top, topBounds, socket);
 
+                Vector3 middlePosition = rootPosition;
+                float middleRadius = 0f;
                 if (upper.Count > 0 && lower.Count > 0)
                 {
                     Bounds lowerBounds = BoundsOf(lower);
-                    // The chamfered end of the upper piece gets a roller before the lower piece is re-parented.
-                    if (FitCap(character, side + middleName + "Cap", upper, topBounds, false, out Vector3 capCenter, out float capRadius))
-                    {
-                        CapExtents(upper, topBounds, false, out float upperWidth, out float upperDepth, out float upperEndWidth);
-                        CapExtents(lower, lowerBounds, true, out float lowerWidth, out float lowerDepth, out _);
-                        AddRoller(character, side + middleName, rootJoint, capCenter, capRadius, upper, upperWidth, upperDepth, upperEndWidth, lowerWidth, lowerDepth);
-                    }
-                    if (!FitCap(character, side + middleName, lower, lowerBounds, true, out Vector3 middlePosition, out _))
+                    if (!FitCap(character, side + middleName, lower, lowerBounds, true, out middlePosition, out middleRadius))
                     {
                         float y = (topBounds.min.y + lowerBounds.max.y) * 0.5f; // middle of the overlap
                         middlePosition = new Vector3(lowerBounds.center.x, y, lowerBounds.center.z);
+                        middleRadius = Mathf.Min(lowerBounds.size.x, lowerBounds.size.z) * 0.5f;
                     }
                     middle = Joint(side + middleName, rootJoint, middlePosition, lower);
                 }
                 if (end.Count > 0 && top != end) Attach(end, middle != null ? middle : rootJoint);
+
+                Vector3 axis = middle != null ? (middlePosition - rootPosition).normalized : Vector3.down;
+                blends.Add(new Blend(parent, rootJoint, rootPosition, axis, rootRadius * softness, false));
+                if (middle != null) blends.Add(new Blend(rootJoint, middle, middlePosition, axis, middleRadius * softness, true));
                 return rootJoint;
             }
         }
@@ -719,93 +895,6 @@ namespace CharacterPlayground.EditorTools
                 if (f(a) < f(b)) high = b; else low = a;
             }
             return (low + high) * 0.5f;
-        }
-
-        /// <summary>
-        /// A smooth roller hidden inside a joint: a cylinder across the body, as thick as the
-        /// piece whose end it rounds and as wide as its flat sides, so it continues the piece's
-        /// faces without a step and encloses the facets of its chamfered end. While the joint is
-        /// straight it lies a hair inside the two pieces; when the joint bends it shows a smooth
-        /// surface where the chamfer's facets would be. Only ends shaped like a roller get one: a
-        /// dome (a shoulder, the end of a tapered upper arm) is round in every direction already.
-        /// </summary>
-        static void AddRoller(string character, string joint, Transform parent, Vector3 center, float radius, List<Transform> piece,
-            float halfWidth, float halfDepth, float endHalfWidth, float otherHalfWidth, float otherHalfDepth)
-        {
-            bool rollerShaped = endHalfWidth >= halfWidth * 0.8f;
-            float r = Mathf.Min(radius, halfDepth, otherHalfDepth) * 0.999f;
-            float halfLength = Mathf.Min(halfWidth, otherHalfWidth) * 0.999f;
-            bool reachesFaces = r >= halfDepth * 0.97f && halfLength >= halfWidth * 0.97f;
-            if (!rollerShaped || !reachesFaces)
-            {
-                Debug.Log($"[Playground] {character}: сустав {joint} без ролика — конец детали {(rollerShaped ? "тоньше соседней" : "скруглён со всех сторон")}.");
-                return;
-            }
-
-            var roller = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            roller.name = joint + "Roller";
-            UnityEngine.Object.DestroyImmediate(roller.GetComponent<Collider>());
-            roller.transform.SetParent(parent, false);
-            // The primitive stands along Y; lay it along X, across the body.
-            roller.transform.SetPositionAndRotation(center, parent.root.rotation * Quaternion.Euler(0f, 0f, 90f));
-            roller.transform.localScale = new Vector3(r * 2f, halfLength, r * 2f);
-            Renderer skin = piece[0].GetComponentInChildren<Renderer>(true);
-            if (skin != null) roller.GetComponent<Renderer>().sharedMaterial = skin.sharedMaterial;
-            Debug.Log($"[Playground] {character}: ролик {joint} — радиус {r:0.000} м, ширина {halfLength * 2f:0.000} м");
-        }
-
-        /// <summary>
-        /// A smooth ball around the dome at the end of a piece, centred on the joint: it replaces
-        /// the dome's facets with a round surface and, where the dome is cut flat against the
-        /// body (a shoulder), fills the cut so nothing flat shows when the piece turns away. The
-        /// half inside the body stays hidden there, so the ball must fit inside the body.
-        /// </summary>
-        static void AddBall(string character, string joint, Transform parent, Vector3 center, List<Transform> piece, Bounds bounds, Bounds socket)
-        {
-            float radius = 0f;
-            foreach (Vector3 p in CapPoints(piece, bounds, true)) radius = Mathf.Max(radius, Vector3.Distance(p, center));
-            radius *= 0.99f;
-            if (radius <= 0f || radius > socket.size.z * 0.5f || radius > socket.size.y * 0.5f)
-            {
-                Debug.Log($"[Playground] {character}: сустав {joint} без шара — не помещается в торсе.");
-                return;
-            }
-            var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            ball.name = joint + "Ball";
-            UnityEngine.Object.DestroyImmediate(ball.GetComponent<Collider>());
-            ball.transform.SetParent(parent, false);
-            ball.transform.SetPositionAndRotation(center, parent.root.rotation);
-            ball.transform.localScale = Vector3.one * (radius * 2f);
-            Renderer skin = piece[0].GetComponentInChildren<Renderer>(true);
-            if (skin != null) ball.GetComponent<Renderer>().sharedMaterial = skin.sharedMaterial;
-            Debug.Log($"[Playground] {character}: шар {joint} — радиус {radius:0.000} м");
-        }
-
-        /// <summary>
-        /// Half the width (X) and depth (Z) of the end of a piece, and the half width of its very
-        /// tip (the outermost 12 %): a roller-shaped end keeps its width to the tip, a dome narrows.
-        /// </summary>
-        static void CapExtents(List<Transform> parts, Bounds bounds, bool top, out float halfWidth, out float halfDepth, out float endHalfWidth)
-        {
-            List<Vector3> points = CapPoints(parts, bounds, top);
-            halfWidth = endHalfWidth = bounds.size.x * 0.5f;
-            halfDepth = bounds.size.z * 0.5f;
-            if (points.Count == 0) return;
-            float tip = top ? bounds.max.y - bounds.size.y * 0.12f : bounds.min.y + bounds.size.y * 0.12f;
-            float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
-            float tipMinX = float.MaxValue, tipMaxX = float.MinValue;
-            foreach (Vector3 p in points)
-            {
-                minX = Mathf.Min(minX, p.x); maxX = Mathf.Max(maxX, p.x);
-                minZ = Mathf.Min(minZ, p.z); maxZ = Mathf.Max(maxZ, p.z);
-                if (top ? p.y >= tip : p.y <= tip)
-                {
-                    tipMinX = Mathf.Min(tipMinX, p.x); tipMaxX = Mathf.Max(tipMaxX, p.x);
-                }
-            }
-            halfWidth = (maxX - minX) * 0.5f;
-            halfDepth = (maxZ - minZ) * 0.5f;
-            endHalfWidth = tipMaxX > tipMinX ? (tipMaxX - tipMinX) * 0.5f : 0f;
         }
 
         static Transform Joint(string name, Transform parent, Vector3 worldPosition, List<Transform> parts)
