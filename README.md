@@ -85,16 +85,17 @@ tools/unity.sh build     # собрать WebGL в Build/WebGL
 Скрипт сам поднимает Docker, скачивает образ `unityci/editor:ubuntu-6000.0.84f1-webgl-3` (~7.5 ГБ)
 и запускает Unity без окна. Unity требует лицензию даже в таком режиме — её берут из переменных окружения:
 
-- **Unity Personal** (бесплатная): `UNITY_LICENSE` — содержимое файла `Unity_lic.ulf`
-  (как есть или в base64). Файл появляется после входа в Unity Hub на своём компьютере:
-  - Windows: `C:\ProgramData\Unity\Unity_lic.ulf`
-  - macOS: `/Library/Application Support/Unity/Unity_lic.ulf`
-  - Linux: `~/.local/share/unity3d/Unity/Unity_lic.ulf`
-- **Unity Pro / Plus**: `UNITY_SERIAL`, `UNITY_EMAIL`, `UNITY_PASSWORD`.
+- **Unity Personal** (бесплатная): `UNITY_EMAIL` и `UNITY_PASSWORD` от аккаунта Unity.
+  На каждый запуск скрипт берёт место лицензии через Unity Licensing Client
+  (`--activate-all --include-personal`) и возвращает его после сборки.
+  Файл `.ulf` для Personal больше не выдаётся — Unity отключил ручную активацию.
+  Если вход в Unity через Google/Apple, задайте пароль аккаунта на https://id.unity.com.
+- **Unity Pro / Plus**: дополнительно `UNITY_SERIAL`.
+- **Готовый `.ulf`** (Enterprise или старые активации): `UNITY_LICENSE` — содержимое файла как есть или в base64.
 
-Сеть окружения должна пускать к серверам лицензий Unity: `license.unity3d.com`,
-`activation.unity3d.com`, `core.cloud.unity3d.com`, `public-cdn.cloud.unity3d.com`,
-`cdp.cloud.unity3d.com`, `api.unity.com`, `login.unity.com`.
+Сеть окружения должна пускать к серверам Unity: `core.cloud.unity3d.com`, `license.unity3d.com`,
+`activation.unity3d.com`, `public-cdn.cloud.unity3d.com`, `cdp.cloud.unity3d.com`,
+`api.unity.com`, `login.unity.com`.
 
 ## Локально
 

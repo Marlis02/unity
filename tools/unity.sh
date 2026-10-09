@@ -7,8 +7,9 @@
 #   tools/unity.sh run ARGS  run the editor with custom arguments
 #
 # License (Unity needs one even in batch mode), from the environment:
-#   UNITY_LICENSE                       contents of Unity_lic.ulf (raw XML or base64) — Personal
-#   UNITY_SERIAL + UNITY_EMAIL + UNITY_PASSWORD                                        — Pro/Plus
+#   UNITY_EMAIL + UNITY_PASSWORD                   Personal (free): a seat is taken per run and returned
+#   UNITY_SERIAL + UNITY_EMAIL + UNITY_PASSWORD    Pro/Plus
+#   UNITY_LICENSE                                  a .ulf file (raw XML or base64), Enterprise/legacy
 set -euo pipefail
 
 IMAGE="${UNITY_IMAGE:-unityci/editor:ubuntu-6000.0.84f1-webgl-3}"
@@ -50,13 +51,14 @@ docker_args() {
   if [[ -f "$LICENSE_DIR/Unity_lic.ulf" ]]; then
     args+=(-v "$LICENSE_DIR:/license:ro")
   fi
+  # Values are inherited from this environment, never written on the command line.
   for name in UNITY_SERIAL UNITY_EMAIL UNITY_PASSWORD; do
     if [[ -n "${!name:-}" ]]; then args+=(-e "$name"); fi
   done
   printf '%s\n' "${args[@]}"
 }
 
-write_license() {
+check_license_settings() {
   rm -rf "$LICENSE_DIR"
   if [[ -n "${UNITY_LICENSE:-}" ]]; then
     mkdir -p "$LICENSE_DIR"
@@ -69,33 +71,81 @@ write_license() {
     fi
     return
   fi
-  if [[ -z "${UNITY_SERIAL:-}" ]]; then
-    die "No Unity license. Set UNITY_LICENSE (Unity_lic.ulf contents) or UNITY_SERIAL/UNITY_EMAIL/UNITY_PASSWORD."
-  fi
-  [[ -n "${UNITY_EMAIL:-}" && -n "${UNITY_PASSWORD:-}" ]] || die "UNITY_SERIAL needs UNITY_EMAIL and UNITY_PASSWORD."
+  if [[ -n "${UNITY_EMAIL:-}" && -n "${UNITY_PASSWORD:-}" ]]; then return; fi
+  if [[ -n "${UNITY_SERIAL:-}" ]]; then die "UNITY_SERIAL needs UNITY_EMAIL and UNITY_PASSWORD."; fi
+  die "No Unity license. Set UNITY_EMAIL and UNITY_PASSWORD (Unity account), plus UNITY_SERIAL for Pro."
 }
 
-# Activates inside the container, runs the editor, then returns a serial license.
+# Activates inside the container, runs the editor, then gives the seat back.
 run_editor() {
-  write_license
+  check_license_settings
   mkdir -p "$EDITOR_LOG_DIR"
   local -a args
   mapfile -t args < <(docker_args)
   local script='
 set -uo pipefail
-ULF_DIR=/root/.local/share/unity3d/Unity
-if [[ -f /license/Unity_lic.ulf ]]; then
-  mkdir -p "$ULF_DIR" && cp /license/Unity_lic.ulf "$ULF_DIR/Unity_lic.ulf"
-  unity-editor -nographics -quit -manualLicenseFile "$ULF_DIR/Unity_lic.ulf" -logFile /project/Logs/activation.log >/dev/null 2>&1 || true
-elif [[ -n "${UNITY_SERIAL:-}" ]]; then
+CLIENT=/opt/unity/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client
+ACTIVATION_LOG=/project/Logs/activation.log
+: >"$ACTIVATION_LOG"
+HAVE_ACCOUNT=false
+[[ -n "${UNITY_EMAIL:-}" && -n "${UNITY_PASSWORD:-}" ]] && HAVE_ACCOUNT=true
+
+activate_personal() {
+  local attempt out code
+  for attempt in 1 2 3; do
+    out=$("$CLIENT" --activate-all --include-personal --username "$UNITY_EMAIL" --password "$UNITY_PASSWORD" 2>&1)
+    code=$?
+    printf "%s\n" "$out" >>"$ACTIVATION_LOG"
+    # The client exits 0 even when no seat was assigned.
+    if [[ $code -eq 0 ]] && ! grep -qiE "No seat available|No license activation found" <<<"$out"; then
+      return 0
+    fi
+    grep -qiE "invalid (credentials|password|username)|unauthori[sz]ed|401" <<<"$out" && return 1
+    sleep $((attempt * 10))
+  done
+  return 1
+}
+
+return_personal() {
+  local out
+  out=$("$CLIENT" --return-ulf 2>&1)
+  printf "%s\n" "$out" >>"$ACTIVATION_LOG"
+  if grep -qi "not found" <<<"$out"; then
+    unity-editor -nographics -quit -returnlicense -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" \
+      -logFile - >>"$ACTIVATION_LOG" 2>&1 || true
+  fi
+}
+
+METHOD=none
+if [[ -n "${UNITY_SERIAL:-}" ]]; then
+  METHOD=serial
   unity-editor -nographics -quit -serial "$UNITY_SERIAL" -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" \
-    -logFile /project/Logs/activation.log >/dev/null 2>&1 || true
+    -logFile - >>"$ACTIVATION_LOG" 2>&1 || true
+elif [[ -f /license/Unity_lic.ulf ]]; then
+  METHOD=file
+  ULF_DIR=/root/.local/share/unity3d/Unity
+  mkdir -p "$ULF_DIR" && cp /license/Unity_lic.ulf "$ULF_DIR/Unity_lic.ulf"
+  unity-editor -nographics -quit -manualLicenseFile "$ULF_DIR/Unity_lic.ulf" -logFile - >>"$ACTIVATION_LOG" 2>&1 || true
+  # A .ulf is bound to the machine that requested it; use the account instead when it does not match.
+  if grep -q "Machine bindings don.t match" "$ACTIVATION_LOG" && $HAVE_ACCOUNT; then METHOD=personal; fi
+elif $HAVE_ACCOUNT; then
+  METHOD=personal
 fi
+
+if [[ $METHOD == personal ]] && ! activate_personal; then
+  echo "[unity] Personal license activation failed; see Logs/activation.log" >&2
+  return_personal
+  exit 3
+fi
+
 unity-editor -nographics -projectPath /project -logFile - "$@"
 code=$?
-if [[ -n "${UNITY_SERIAL:-}" ]]; then
-  unity-editor -nographics -quit -returnlicense -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /dev/null >/dev/null 2>&1 || true
-fi
+
+case $METHOD in
+  personal) return_personal ;;
+  serial) unity-editor -nographics -quit -returnlicense -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" \
+            -logFile - >>"$ACTIVATION_LOG" 2>&1 || true ;;
+esac
 exit $code
 '
   local status=0
@@ -141,6 +191,6 @@ case "$command" in
   run)
     ensure_docker; ensure_image; run_editor "$@" ;;
   *)
-    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
     exit 1 ;;
 esac
