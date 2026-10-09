@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace CharacterPlayground.EditorTools
@@ -65,6 +66,60 @@ namespace CharacterPlayground.EditorTools
             {
                 triangleTags.Clear();
                 triangleTags.AddRange(keptTags);
+            }
+        }
+
+        /// <summary>
+        /// Closes every open rim with a fan of triangles around its centre, so a piece cut from a
+        /// larger surface becomes a closed shell: a leg cut at the hip keeps a flat top where it
+        /// turns out of the pelvis instead of showing its hollow inside. Tags, one per triangle,
+        /// are extended with the tag of the triangle beside each rim edge.
+        /// </summary>
+        public static void CloseRims(List<Vector3> vertices, List<int> triangles, List<int> triangleTags = null)
+        {
+            var directed = new Dictionary<long, int>(); // edge a->b -> the triangle that runs along it
+            for (int t = 0; t + 2 < triangles.Count; t += 3)
+            {
+                int a = triangles[t], b = triangles[t + 1], c = triangles[t + 2];
+                directed[((long)a << 32) | (uint)b] = t / 3;
+                directed[((long)b << 32) | (uint)c] = t / 3;
+                directed[((long)c << 32) | (uint)a] = t / 3;
+            }
+            var next = new Dictionary<int, int>();
+            var beside = new Dictionary<int, int>();
+            foreach (KeyValuePair<long, int> edge in directed)
+            {
+                int a = (int)(edge.Key >> 32), b = (int)(edge.Key & 0xFFFFFFFF);
+                if (directed.ContainsKey(((long)b << 32) | (uint)a)) continue; // has a neighbour across
+                next[a] = b;
+                beside[a] = edge.Value;
+            }
+
+            var visited = new HashSet<int>();
+            foreach (int start in next.Keys.ToList())
+            {
+                if (visited.Contains(start)) continue;
+                var loop = new List<int>();
+                int v = start;
+                while (!visited.Contains(v) && next.ContainsKey(v))
+                {
+                    visited.Add(v);
+                    loop.Add(v);
+                    v = next[v];
+                }
+                if (v != start || loop.Count < 3) continue; // not a simple closed rim
+
+                Vector3 centre = Vector3.zero;
+                foreach (int i in loop) centre += vertices[i];
+                int middle = vertices.Count;
+                vertices.Add(centre / loop.Count);
+                for (int i = 0; i < loop.Count; i++)
+                {
+                    // The surface runs a->b along the rim; the cap runs the other way to face outwards.
+                    int a = loop[i], b = loop[(i + 1) % loop.Count];
+                    triangles.Add(b); triangles.Add(a); triangles.Add(middle);
+                    triangleTags?.Add(triangleTags[beside[a]]);
+                }
             }
         }
 
@@ -152,8 +207,15 @@ namespace CharacterPlayground.EditorTools
                 Vector3 n = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]);
                 normals[a] += n; normals[b] += n; normals[c] += n;
             }
+            // Divide by the length by hand: Vector3.normalized returns zero for a vector shorter
+            // than 1e-5, which the sum of a few tiny triangles easily is, and a zero normal
+            // shades black.
             var result = new List<Vector3>(vertices.Count);
-            foreach (Vector3 n in normals) result.Add(n.sqrMagnitude > 1e-12f ? n.normalized : Vector3.up);
+            foreach (Vector3 n in normals)
+            {
+                float length = n.magnitude;
+                result.Add(length > 1e-20f ? n / length : Vector3.up);
+            }
             return result;
         }
 

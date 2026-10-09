@@ -710,6 +710,15 @@ namespace CharacterPlayground.EditorTools
                     continue;
                 }
 
+                // A normal the file left empty would shade black; take one from the faces instead.
+                List<Vector3> fromFaces = null;
+                for (int i = 0; i < v.Count && n.Count == v.Count; i++)
+                {
+                    if (n[i].sqrMagnitude > 0.5f && !float.IsNaN(n[i].x)) continue;
+                    fromFaces ??= MeshSmoothing.Normals(v, tris);
+                    n[i] = fromFaces[i];
+                }
+
                 int offset = vertices.Count;
                 for (int i = 0; i < v.Count; i++)
                 {
@@ -739,6 +748,7 @@ namespace CharacterPlayground.EditorTools
                     for (int t = 0; t < group[k].triangles.Count / 3; t++) tags.Add(k);
                 }
                 MeshSmoothing.Weld(v, tris, tags);
+                MeshSmoothing.CloseRims(v, tris, tags);
                 for (int i = 0; i < entry.Key; i++)
                 {
                     MeshSmoothing.Subdivide(v, tris);
@@ -849,7 +859,7 @@ namespace CharacterPlayground.EditorTools
                     {
                         if (j != i && Vector3.Dot(normals[i], normals[j]) > 0.5f) sum += normals[j];
                     }
-                    merged[i] = sum.normalized;
+                    merged[i] = sum / Mathf.Max(1e-20f, sum.magnitude);
                 }
             }
             foreach (KeyValuePair<int, Vector3> pair in merged) normals[pair.Key] = pair.Value;
