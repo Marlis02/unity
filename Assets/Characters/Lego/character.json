@@ -1,0 +1,32 @@
+{
+  "displayName": "Лего",
+  "height": 1.5,
+  "yawOffset": 0,
+  "walkSpeed": 3,
+  "runSpeed": 5.5,
+  "jumpHeight": 1.5,
+  "gravity": 40,
+  "smooth": 1,
+  "segments": {
+    "head": "tripo_part_0",
+    "upperTorso": "tripo_part_2",
+    "lowerTorso": "tripo_part_16, tripo_part_17",
+    "leftUpperArm": "tripo_part_1",
+    "leftLowerArm": "tripo_part_5",
+    "leftHand": "tripo_part_13, tripo_part_18",
+    "rightUpperArm": "tripo_part_8",
+    "rightLowerArm": "tripo_part_3",
+    "rightHand": "tripo_part_12, tripo_part_19",
+    "leftUpperLeg": "tripo_part_7",
+    "leftLowerLeg": "tripo_part_14",
+    "leftFoot": "tripo_part_4, tripo_part_10",
+    "rightUpperLeg": "tripo_part_9",
+    "rightLowerLeg": "tripo_part_15",
+    "rightFoot": "tripo_part_6, tripo_part_11"
+  },
+  "colors": [
+    { "parts": "tripo_part_0, tripo_part_12, tripo_part_13, tripo_part_18, tripo_part_19", "color": "#F5CD30" },
+    { "parts": "tripo_part_2, tripo_part_1, tripo_part_8, tripo_part_3, tripo_part_5", "color": "#C4281C" },
+    { "parts": "tripo_part_16, tripo_part_17, tripo_part_7, tripo_part_9, tripo_part_14, tripo_part_15, tripo_part_4, tripo_part_6, tripo_part_10, tripo_part_11", "color": "#0055BF" }
+  ]
+}

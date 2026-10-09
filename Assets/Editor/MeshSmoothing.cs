@@ -13,39 +13,66 @@ namespace CharacterPlayground.EditorTools
     {
         const float WeldGrid = 1e-4f;
 
-        /// <summary>Merges vertices that sit at the same position, dropping triangles that collapse.</summary>
-        public static void Weld(List<Vector3> vertices, List<int> triangles)
+        /// <summary>
+        /// Merges vertices that sit at the same position (within the weld grid, whichever cell
+        /// they fall in), dropping triangles that collapse. Tags, one per triangle, are kept in
+        /// step with the triangles.
+        /// </summary>
+        public static void Weld(List<Vector3> vertices, List<int> triangles, List<int> triangleTags = null)
         {
-            var slots = new Dictionary<Vector3Int, int>();
+            var cells = new Dictionary<Vector3Int, List<int>>();
             var remap = new int[vertices.Count];
             var welded = new List<Vector3>();
             for (int i = 0; i < vertices.Count; i++)
             {
                 Vector3 p = vertices[i];
-                var key = new Vector3Int(Mathf.RoundToInt(p.x / WeldGrid), Mathf.RoundToInt(p.y / WeldGrid), Mathf.RoundToInt(p.z / WeldGrid));
-                if (!slots.TryGetValue(key, out int index))
+                var cell = new Vector3Int(Mathf.FloorToInt(p.x / WeldGrid), Mathf.FloorToInt(p.y / WeldGrid), Mathf.FloorToInt(p.z / WeldGrid));
+                int index = -1;
+                for (int dx = -1; dx <= 1 && index < 0; dx++)
+                for (int dy = -1; dy <= 1 && index < 0; dy++)
+                for (int dz = -1; dz <= 1 && index < 0; dz++)
+                {
+                    if (!cells.TryGetValue(cell + new Vector3Int(dx, dy, dz), out List<int> near)) continue;
+                    foreach (int j in near)
+                    {
+                        if ((welded[j] - p).sqrMagnitude <= WeldGrid * WeldGrid) { index = j; break; }
+                    }
+                }
+                if (index < 0)
                 {
                     index = welded.Count;
                     welded.Add(p);
-                    slots[key] = index;
+                    if (!cells.TryGetValue(cell, out List<int> own)) cells[cell] = own = new List<int>(1);
+                    own.Add(index);
                 }
                 remap[i] = index;
             }
 
             var kept = new List<int>(triangles.Count);
+            var keptTags = triangleTags != null ? new List<int>(triangleTags.Count) : null;
             for (int t = 0; t + 2 < triangles.Count; t += 3)
             {
                 int a = remap[triangles[t]], b = remap[triangles[t + 1]], c = remap[triangles[t + 2]];
                 if (a == b || b == c || c == a) continue;
                 kept.Add(a); kept.Add(b); kept.Add(c);
+                keptTags?.Add(triangleTags[t / 3]);
             }
             vertices.Clear();
             vertices.AddRange(welded);
             triangles.Clear();
             triangles.AddRange(kept);
+            if (triangleTags != null)
+            {
+                triangleTags.Clear();
+                triangleTags.AddRange(keptTags);
+            }
         }
 
-        /// <summary>One step of Loop subdivision: every triangle becomes four, every edge gets rounded.</summary>
+        /// <summary>
+        /// One step of Loop subdivision: every triangle becomes four, every edge gets rounded.
+        /// Open rims are subdivided as curves of their own, so a piece cut from a larger surface
+        /// keeps its outline.
+        /// </summary>
         public static void Subdivide(List<Vector3> vertices, List<int> triangles)
         {
             int count = vertices.Count;
@@ -60,6 +87,18 @@ namespace CharacterPlayground.EditorTools
                 Link(neighbours, opposite, c, a, b);
             }
 
+            // An open edge (one triangle only) marks the rim of a piece that is not a closed shell,
+            // such as a cut made by a segmentation tool. Rim vertices follow the rim only, so the
+            // rim keeps its place instead of being pulled inside and opening a gap to the next piece.
+            var rim = new List<int>[count];
+            foreach (KeyValuePair<long, List<int>> edge in opposite)
+            {
+                if (edge.Value.Count != 1) continue;
+                int a = (int)(edge.Key >> 32), b = (int)(edge.Key & 0xFFFFFFFF);
+                (rim[a] ??= new List<int>(2)).Add(b);
+                (rim[b] ??= new List<int>(2)).Add(a);
+            }
+
             // Existing vertices move towards the average of their neighbours (Loop's weights).
             var result = new List<Vector3>(count * 4);
             for (int i = 0; i < count; i++)
@@ -68,6 +107,13 @@ namespace CharacterPlayground.EditorTools
                 if (n < 2)
                 {
                     result.Add(vertices[i]);
+                    continue;
+                }
+                if (rim[i] != null)
+                {
+                    result.Add(rim[i].Count == 2
+                        ? 0.75f * vertices[i] + 0.125f * (vertices[rim[i][0]] + vertices[rim[i][1]])
+                        : vertices[i]);
                     continue;
                 }
                 float beta = n == 3 ? 3f / 16f : 3f / (8f * n);

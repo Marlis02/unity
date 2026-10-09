@@ -670,9 +670,11 @@ namespace CharacterPlayground.EditorTools
             var normals = new List<Vector3>();
             var uvs = new List<Vector2>();
             var weights = new List<BoneWeight>();
+            var rounded = new List<bool>();
             var materials = new List<Material>();
             var triangles = new List<List<int>>();
             var parts = new List<GameObject>();
+            var pending = new SortedDictionary<int, List<Piece>>(); // pieces to round, by how much
 
             foreach (MeshFilter filter in root.GetComponentsInChildren<MeshFilter>(true))
             {
@@ -682,7 +684,6 @@ namespace CharacterPlayground.EditorTools
                 parts.Add(filter.gameObject);
                 Transform home = HomeBone(filter.transform, bones);
                 Matrix4x4 toWorld = filter.transform.localToWorldMatrix; // the root sits at the origin, so world is root space
-                int offset = vertices.Count;
 
                 var v = new List<Vector3>();
                 foreach (Vector3 local in source.vertices) v.Add(toWorld.MultiplyPoint3x4(local));
@@ -690,24 +691,6 @@ namespace CharacterPlayground.EditorTools
                 List<Vector2> uv = source.uv.ToList();
                 var tris = new List<int>(source.triangles);
 
-                // Round the piece unless it is textured (welding would break the texture seams).
-                rounding.TryGetValue(filter.transform, out int rounds);
-                bool textured = renderer.sharedMaterials.Any(m => m != null && m.mainTexture != null);
-                if (rounds > 0 && !textured && source.subMeshCount == 1)
-                {
-                    MeshSmoothing.Weld(v, tris);
-                    for (int i = 0; i < rounds; i++) MeshSmoothing.Subdivide(v, tris);
-                    n = MeshSmoothing.Normals(v, tris);
-                    uv = Enumerable.Repeat(Vector2.zero, v.Count).ToList();
-                }
-
-                for (int i = 0; i < v.Count; i++)
-                {
-                    vertices.Add(v[i]);
-                    normals.Add(n.Count == v.Count ? n[i] : Vector3.up);
-                    uvs.Add(uv.Count == v.Count ? uv[i] : Vector2.zero);
-                    weights.Add(Weights(v[i], home, bones, blends));
-                }
                 Material material = renderer.sharedMaterials[0];
                 int slot = materials.IndexOf(material);
                 if (slot < 0)
@@ -716,9 +699,84 @@ namespace CharacterPlayground.EditorTools
                     materials.Add(material);
                     triangles.Add(new List<int>());
                 }
+
+                // Round the piece unless it is textured (welding would break the texture seams).
+                rounding.TryGetValue(filter.transform, out int rounds);
+                bool textured = renderer.sharedMaterials.Any(m => m != null && m.mainTexture != null);
+                if (rounds > 0 && !textured && source.subMeshCount == 1)
+                {
+                    if (!pending.TryGetValue(rounds, out List<Piece> group)) pending[rounds] = group = new List<Piece>();
+                    group.Add(new Piece { vertices = v, triangles = tris, home = home, slot = slot });
+                    continue;
+                }
+
+                int offset = vertices.Count;
+                for (int i = 0; i < v.Count; i++)
+                {
+                    vertices.Add(v[i]);
+                    normals.Add(n.Count == v.Count ? n[i] : Vector3.up);
+                    uvs.Add(uv.Count == v.Count ? uv[i] : Vector2.zero);
+                    weights.Add(Weights(v[i], home, bones, blends));
+                    rounded.Add(false);
+                }
                 foreach (int index in tris) triangles[slot].Add(index + offset);
             }
+
+            // Pieces rounded by the same amount are welded together first: pieces cut from one
+            // surface (a segmentation tool splits an arm at the elbow, say) join back into that
+            // surface, with no rim left to open a gap or draw a seam, and are rounded as one.
+            foreach (KeyValuePair<int, List<Piece>> entry in pending)
+            {
+                List<Piece> group = entry.Value;
+                var v = new List<Vector3>();
+                var tris = new List<int>();
+                var tags = new List<int>(); // the piece each triangle came from
+                for (int k = 0; k < group.Count; k++)
+                {
+                    int offset = v.Count;
+                    v.AddRange(group[k].vertices);
+                    foreach (int index in group[k].triangles) tris.Add(index + offset);
+                    for (int t = 0; t < group[k].triangles.Count / 3; t++) tags.Add(k);
+                }
+                MeshSmoothing.Weld(v, tris, tags);
+                for (int i = 0; i < entry.Key; i++)
+                {
+                    MeshSmoothing.Subdivide(v, tris);
+                    tags = tags.SelectMany(tag => Enumerable.Repeat(tag, 4)).ToList();
+                }
+                List<Vector3> n = MeshSmoothing.Normals(v, tris);
+
+                // A vertex belongs to the piece of the first triangle that uses it; on a welded rim
+                // either side gives the same weights, as the blend zones are read from positions.
+                var owner = new int[v.Count];
+                for (int i = 0; i < owner.Length; i++) owner[i] = -1;
+                for (int t = 0; t < tags.Count; t++)
+                {
+                    for (int corner = 0; corner < 3; corner++)
+                    {
+                        int index = tris[t * 3 + corner];
+                        if (owner[index] < 0) owner[index] = tags[t];
+                    }
+                }
+                int start = vertices.Count;
+                for (int i = 0; i < v.Count; i++)
+                {
+                    vertices.Add(v[i]);
+                    normals.Add(n[i]);
+                    uvs.Add(Vector2.zero);
+                    weights.Add(Weights(v[i], group[Mathf.Max(0, owner[i])].home, bones, blends));
+                    rounded.Add(true);
+                }
+                for (int t = 0; t < tags.Count; t++)
+                {
+                    List<int> list = triangles[group[tags[t]].slot];
+                    list.Add(tris[t * 3] + start);
+                    list.Add(tris[t * 3 + 1] + start);
+                    list.Add(tris[t * 3 + 2] + start);
+                }
+            }
             if (vertices.Count == 0) return;
+            MergeRimNormals(vertices, normals, rounded);
 
             var mesh = new Mesh { name = character + " skin" };
             if (vertices.Count > 65535) mesh.indexFormat = IndexFormat.UInt32;
@@ -750,6 +808,51 @@ namespace CharacterPlayground.EditorTools
             foreach (GameObject part in parts) UnityEngine.Object.DestroyImmediate(part);
             string zones = string.Join(", ", blends.Select(b => $"{b.child.name} {b.halfWidth * 2f:0.00} м"));
             Debug.Log($"[Playground] {character}: кожа из {vertices.Count} вершин на {bones.Count} костях; зоны сгиба: {zones}");
+        }
+
+        /// <summary>A body part waiting to be rounded together with the others rounded as much.</summary>
+        class Piece
+        {
+            public List<Vector3> vertices;
+            public List<int> triangles;
+            public Transform home;
+            public int slot;
+        }
+
+        /// <summary>
+        /// Pieces cut from one surface (a segmentation tool splits an arm at the elbow, say) share
+        /// a rim of coincident vertices, each side shaded from its own triangles only. Averaging
+        /// their normals shades the seam as the continuous surface it was. Vertices that merely
+        /// touch, such as an arm against the side of the torso, face different ways and are left
+        /// alone; so are pieces kept as exported, whose split normals draw their hard edges.
+        /// </summary>
+        static void MergeRimNormals(List<Vector3> vertices, List<Vector3> normals, List<bool> rounded)
+        {
+            const float Grid = 1e-3f;
+            var groups = new Dictionary<Vector3Int, List<int>>();
+            for (int i = 0; i < vertices.Count; i++)
+            {
+                if (!rounded[i]) continue;
+                Vector3 p = vertices[i];
+                var key = new Vector3Int(Mathf.RoundToInt(p.x / Grid), Mathf.RoundToInt(p.y / Grid), Mathf.RoundToInt(p.z / Grid));
+                if (!groups.TryGetValue(key, out List<int> group)) groups[key] = group = new List<int>(2);
+                group.Add(i);
+            }
+            var merged = new Dictionary<int, Vector3>();
+            foreach (List<int> group in groups.Values)
+            {
+                if (group.Count < 2) continue;
+                foreach (int i in group)
+                {
+                    Vector3 sum = normals[i];
+                    foreach (int j in group)
+                    {
+                        if (j != i && Vector3.Dot(normals[i], normals[j]) > 0.5f) sum += normals[j];
+                    }
+                    merged[i] = sum.normalized;
+                }
+            }
+            foreach (KeyValuePair<int, Vector3> pair in merged) normals[pair.Key] = pair.Value;
         }
 
         /// <summary>The bone a part is attached to: its nearest ancestor among the bones.</summary>
