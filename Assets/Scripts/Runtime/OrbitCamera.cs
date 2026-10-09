@@ -6,7 +6,8 @@ namespace CharacterPlayground
     /// <summary>
     /// Free camera around a point, made for looking at characters and recording them.
     /// Touch: one finger orbits; two fingers move the view, pinch to zoom and twist to turn;
-    /// double tap asks to reframe; a long press is reported for bringing hidden menus back.
+    /// a single tap and a double tap are reported (the single one only once no second tap
+    /// follows), as is a long press, for bringing hidden menus back.
     /// Mouse: left drag orbits, right or middle drag (or Shift + left) moves, the wheel zooms,
     /// double click or F asks to reframe. Movement is smoothed slightly so recordings look steady.
     /// </summary>
@@ -26,6 +27,7 @@ namespace CharacterPlayground
         public float minPitch = -60f;
         public float maxPitch = 89f;
 
+        public event Action Tapped;
         public event Action DoubleTapped;
         public event Action LongPressed;
 
@@ -46,6 +48,7 @@ namespace CharacterPlayground
         bool longPressFired;
         float lastTapTime = -10f;
         Vector2 lastTapPosition;
+        bool tapPending;
         float lastTouchTime = -10f;
 
         enum MouseDrag { None, Orbit, Pan }
@@ -87,6 +90,11 @@ namespace CharacterPlayground
             if (Input.touchCount > 0 || fingerCount > 0) HandleTouches();
             else HandleMouse();
             if (Input.GetKeyDown(KeyCode.F)) DoubleTapped?.Invoke();
+            if (tapPending && Time.unscaledTime - lastTapTime > DoubleTapSeconds)
+            {
+                tapPending = false;
+                Tapped?.Invoke();
+            }
 
             targetDistance = Mathf.Clamp(targetDistance, minDistance, maxDistance);
             targetPitch = Mathf.Clamp(targetPitch, Mathf.Max(minPitch, LowestPitch(targetPivot, targetDistance)), maxPitch);
@@ -185,6 +193,7 @@ namespace CharacterPlayground
             id1 = b;
 
             if (active >= 2 || (active == 1 && (p0 - pressOrigin).magnitude > TapSlop)) pressMoved = true;
+            if (pressMoved) tapPending = false; // a drag right after a tap is not a tap
             if (active == 1 && !pressMoved && !longPressFired && Time.unscaledTime - pressStart >= LongPressSeconds)
             {
                 longPressFired = true;
@@ -206,13 +215,14 @@ namespace CharacterPlayground
 
         void Tap(Vector2 position)
         {
-            if (Time.unscaledTime - lastTapTime <= DoubleTapSeconds && (position - lastTapPosition).magnitude <= TapSlop * 2f)
+            if (tapPending && Time.unscaledTime - lastTapTime <= DoubleTapSeconds && (position - lastTapPosition).magnitude <= TapSlop * 2f)
             {
-                lastTapTime = -10f;
+                tapPending = false;
                 DoubleTapped?.Invoke();
             }
             else
             {
+                tapPending = true;
                 lastTapTime = Time.unscaledTime;
                 lastTapPosition = position;
             }

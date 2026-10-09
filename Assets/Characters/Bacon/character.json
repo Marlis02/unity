@@ -2,8 +2,8 @@
   "displayName": "Бекон",
   "height": 1.6,
   "yawOffset": 180,
-  "walkSpeed": 4.5,
-  "runSpeed": 7,
+  "walkSpeed": 3,
+  "runSpeed": 5.5,
   "jumpHeight": 1.5,
   "gravity": 40,
   "segments": {

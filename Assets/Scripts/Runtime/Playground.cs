@@ -6,9 +6,9 @@ namespace CharacterPlayground
 {
     /// <summary>
     /// Entry point of the viewer scene: a clean stage with the imported characters
-    /// (Resources/Characters) and the built-in ones, a free camera for touch and mouse, and a
-    /// small menu to pick a character and the motion it shows on the spot. The menu hides
-    /// completely so the frame can be recorded clean.
+    /// (Resources/Characters), a free camera for touch and mouse, and a small menu to pick a
+    /// character, the motion it shows on the spot, the playback speed and a pause. The menu
+    /// hides completely so the frame can be recorded clean.
     /// </summary>
     public class Playground : MonoBehaviour
     {
@@ -18,15 +18,15 @@ namespace CharacterPlayground
 
         static readonly CharacterMotion[] Motions = { CharacterMotion.Idle, CharacterMotion.Walk, CharacterMotion.Run, CharacterMotion.Jump };
         static readonly string[] MotionTitles = { "Покой", "Шаг", "Бег", "Прыжок" };
+        static readonly float[] Speeds = { 0.25f, 0.5f, 1f };
+        static readonly string[] SpeedTitles = { "0.25×", "0.5×", "1×" };
 
         public Material baseMaterial;
 
         class Entry
         {
             public string name;
-            public bool imported;
             public GameObject prefab;
-            public DefaultCharacters.Spec? spec;
             public CharacterProfile profile;
             public CharacterMotion motion;
             public PlayableCharacter instance;
@@ -40,6 +40,8 @@ namespace CharacterPlayground
         int currentIndex;
         bool showAll = true;
         bool menuVisible = true;
+        float playbackSpeed = 0.5f; // slowed down so the motions are easy to follow
+        bool paused;
         float fps;
         float fpsTimer;
         int fpsFrames;
@@ -65,6 +67,7 @@ namespace CharacterPlayground
             CollectEntries();
             Arrange();
             FrameCurrent(true);
+            SetPlaybackSpeed(playbackSpeed);
         }
 
         void OnDestroy()
@@ -82,6 +85,7 @@ namespace CharacterPlayground
             camera.farClipPlane = 400f;
             camera.fieldOfView = 60f;
             orbit = cameraObject.AddComponent<OrbitCamera>();
+            orbit.Tapped += () => SetPaused(!paused);
             orbit.DoubleTapped += () => FrameCurrent(false);
             orbit.LongPressed += () => SetMenuVisible(true);
 
@@ -110,12 +114,7 @@ namespace CharacterPlayground
                 if (character == null) continue;
                 CharacterProfile profile = character.profile.Clone();
                 if (string.IsNullOrEmpty(profile.displayName)) profile.displayName = prefab.name;
-                entries.Add(new Entry { name = profile.displayName, imported = true, prefab = prefab, profile = profile });
-            }
-
-            foreach (var spec in DefaultCharacters.All())
-            {
-                entries.Add(new Entry { name = spec.name, spec = spec, profile = spec.profile.Clone() });
+                entries.Add(new Entry { name = profile.displayName, prefab = prefab, profile = profile });
             }
         }
 
@@ -157,6 +156,7 @@ namespace CharacterPlayground
                 Entry entry = entries[i];
                 Place(entry, new Vector3(x - widths[i] * 0.5f - offsets[i], 0f, 0f));
                 x -= widths[i] + RowGap;
+                if (entries.Count < 2) continue; // the menu already names a lone character
                 entry.label = StageBuilder.Label(entry.instance.transform, new Vector3(offsets[i], entry.height + 0.3f, 0f),
                     $"{entry.name}\n{entry.height:0.00} м", 0.7f).gameObject;
                 entry.label.SetActive(menuVisible);
@@ -165,9 +165,7 @@ namespace CharacterPlayground
 
         void Spawn(Entry entry, Vector3 position)
         {
-            GameObject instance = entry.prefab != null
-                ? Instantiate(entry.prefab, charactersRoot)
-                : DefaultCharacters.Create(entry.spec.Value, baseMaterial);
+            GameObject instance = Instantiate(entry.prefab, charactersRoot);
             instance.name = entry.name;
             instance.transform.SetParent(charactersRoot, false);
 
@@ -214,6 +212,20 @@ namespace CharacterPlayground
             FrameCurrent(false);
         }
 
+        /// <summary>Speed and pause act on the characters only; the camera keeps moving freely.</summary>
+        void SetPlaybackSpeed(float speed)
+        {
+            playbackSpeed = speed;
+            paused = false;
+            Time.timeScale = playbackSpeed;
+        }
+
+        void SetPaused(bool value)
+        {
+            paused = value;
+            Time.timeScale = paused ? 0f : playbackSpeed;
+        }
+
         void SetMenuVisible(bool visible)
         {
             menuVisible = visible;
@@ -242,13 +254,14 @@ namespace CharacterPlayground
             }
             if (Input.GetKeyDown(KeyCode.H) || Input.GetKeyDown(KeyCode.F1)) SetMenuVisible(!menuVisible);
             if (Input.GetKeyDown(KeyCode.L)) SetShowAll(!showAll);
+            if (Input.GetKeyDown(KeyCode.Space)) SetPaused(!paused);
         }
 
         // ---------------------------------------------------------------- menu
 
         void OnGUI()
         {
-            if (!menuVisible || entries.Count == 0) return;
+            if (!menuVisible) return;
             PlaygroundFont.ApplyToGui();
             EnsureStyles();
             // Phones get a menu about as wide as the screen's short side, big enough for fingers.
@@ -259,7 +272,8 @@ namespace CharacterPlayground
             float width = Screen.width / scale;
             float height = Screen.height / scale;
 
-            DrawMenu(scale, width);
+            if (entries.Count > 0) DrawMenu(scale, width);
+            else DrawEmpty(width);
             DrawFps(width);
             DrawHelp(width, height, scale);
 
@@ -269,18 +283,20 @@ namespace CharacterPlayground
         void DrawMenu(float scale, float screenWidth)
         {
             Entry entry = entries[currentIndex];
-            var area = new Rect(10f, 10f, Mathf.Min(330f, screenWidth - 20f), 158f);
+            bool several = entries.Count > 1;
+            var area = new Rect(10f, 10f, Mathf.Min(330f, screenWidth - 20f), 206f);
             PlaygroundInput.RegisterUiRect(new Rect(area.x * scale, area.y * scale, area.width * scale, area.height * scale));
 
             GUILayout.BeginArea(area, panelStyle);
 
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("<", buttonStyle, GUILayout.Width(38f), GUILayout.Height(32f))) Select(currentIndex - 1);
-            GUILayout.Label($"{entry.name}  ({currentIndex + 1}/{entries.Count})", titleStyle, GUILayout.Height(32f));
-            if (GUILayout.Button(">", buttonStyle, GUILayout.Width(38f), GUILayout.Height(32f))) Select(currentIndex + 1);
+            if (several && GUILayout.Button("<", buttonStyle, GUILayout.Width(38f), GUILayout.Height(32f))) Select(currentIndex - 1);
+            string title = several ? $"{entry.name}  ({currentIndex + 1}/{entries.Count})" : entry.name;
+            GUILayout.Label(title, titleStyle, GUILayout.Height(32f));
+            if (several && GUILayout.Button(">", buttonStyle, GUILayout.Width(38f), GUILayout.Height(32f))) Select(currentIndex + 1);
             GUILayout.EndHorizontal();
 
-            GUILayout.Label($"{(entry.imported ? "свой персонаж" : "встроенный")} · рост {entry.height:0.00} м", smallStyle);
+            GUILayout.Label($"рост {entry.height:0.00} м", smallStyle);
 
             GUILayout.BeginHorizontal();
             for (int i = 0; i < Motions.Length; i++)
@@ -292,12 +308,30 @@ namespace CharacterPlayground
 
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button(showAll ? "Все на сцене" : "Только этот", buttonStyle, GUILayout.Height(34f))) SetShowAll(!showAll);
+            for (int i = 0; i < Speeds.Length; i++)
+            {
+                GUIStyle style = !paused && Mathf.Approximately(playbackSpeed, Speeds[i]) ? activeButtonStyle : buttonStyle;
+                if (GUILayout.Button(SpeedTitles[i], style, GUILayout.Height(34f))) SetPlaybackSpeed(Speeds[i]);
+            }
+            if (GUILayout.Button(paused ? "Дальше" : "Пауза", paused ? activeButtonStyle : buttonStyle, GUILayout.Height(34f))) SetPaused(!paused);
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            if (several && GUILayout.Button(showAll ? "Все на сцене" : "Только этот", buttonStyle, GUILayout.Height(34f))) SetShowAll(!showAll);
             if (GUILayout.Button("К персонажу", buttonStyle, GUILayout.Height(34f))) FrameCurrent(false);
             if (GUILayout.Button("Скрыть меню", buttonStyle, GUILayout.Height(34f))) SetMenuVisible(false);
             GUILayout.EndHorizontal();
 
             GUILayout.EndArea();
+        }
+
+        void DrawEmpty(float screenWidth)
+        {
+            var area = new Rect(10f, 10f, Mathf.Min(330f, screenWidth - 20f), 60f);
+            GUI.Box(area, GUIContent.none, panelStyle);
+            GUI.Label(new Rect(area.x + 12f, area.y + 8f, area.width - 24f, area.height - 16f),
+                "Персонажей нет: положите модель в папку Assets/Characters и соберите проект.", labelStyle);
         }
 
         void DrawFps(float width)
@@ -309,9 +343,9 @@ namespace CharacterPlayground
         {
             string help = Input.touchSupported
                 ? "1 палец — вращать  ·  2 пальца — двигать, щипок — зум, поворот пальцев — крутить\n" +
-                  "Двойной тап — к персонажу  ·  долгое нажатие — вернуть меню"
+                  "Тап — пауза  ·  двойной тап — к персонажу  ·  долгое нажатие — вернуть меню"
                 : "Левая кнопка — вращать  ·  правая или Shift — двигать  ·  колесо — зум\n" +
-                  "Двойной клик или F — к персонажу  ·  1–9 — выбрать  ·  L — все/один  ·  H — меню";
+                  "Пробел — пауза  ·  двойной клик или F — к персонажу  ·  H — меню";
             float boxWidth = Mathf.Min(560f, width - 20f);
             float textHeight = smallStyle.CalcHeight(new GUIContent(help), boxWidth - 20f);
             var area = new Rect(10f, height - textHeight - 22f, boxWidth, textHeight + 12f);

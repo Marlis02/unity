@@ -3,10 +3,10 @@ using UnityEngine;
 namespace CharacterPlayground
 {
     /// <summary>
-    /// Swings limb pivots so movement reads clearly without any animation clips. Used by the
-    /// built-in primitive characters and by imported models assembled from separate body parts
-    /// (see "segments" in character.json). Pivots are expected to face the character's +Z with
-    /// limbs hanging down; the optional joints add knees, elbows, a waist and a neck.
+    /// Swings limb pivots so movement reads clearly without any animation clips. Used by
+    /// imported models assembled from separate body parts (see "segments" in character.json).
+    /// Pivots are expected to face the character's +Z with limbs hanging down; the optional
+    /// joints add knees, elbows, a waist and a neck.
     /// </summary>
     public class ProceduralGait : MonoBehaviour
     {
