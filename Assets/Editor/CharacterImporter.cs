@@ -527,8 +527,12 @@ namespace CharacterPlayground.EditorTools
             if (upperTorso.Count > 0)
             {
                 Bounds upper = BoundsOf(upperTorso);
-                float waistY = lowerTorso.Count > 0 ? BoundsOf(lowerTorso).max.y : upper.min.y + upper.size.y * 0.15f;
-                chest = Joint("Waist", body, new Vector3(upper.center.x, waistY, upper.center.z), upperTorso);
+                if (!FitCap(name, "Waist", upperTorso, upper, false, out Vector3 waist))
+                {
+                    float waistY = lowerTorso.Count > 0 ? (upper.min.y + BoundsOf(lowerTorso).max.y) * 0.5f : upper.min.y + upper.size.y * 0.15f;
+                    waist = new Vector3(upper.center.x, waistY, upper.center.z);
+                }
+                chest = Joint("Waist", body, waist, upperTorso);
             }
             Transform torso = chest != null ? chest : body;
 
@@ -541,10 +545,10 @@ namespace CharacterPlayground.EditorTools
                 neck = Joint("Neck", torso, new Vector3(main.center.x, Mathf.Min(main.min.y, headBounds.min.y), main.center.z), head);
             }
 
-            Transform leftShoulder = leftArm.Build("Left", "Shoulder", "Elbow", torso, out Transform leftElbow);
-            Transform rightShoulder = rightArm.Build("Right", "Shoulder", "Elbow", torso, out Transform rightElbow);
-            Transform leftHip = leftLeg.Build("Left", "Hip", "Knee", body, out Transform leftKnee);
-            Transform rightHip = rightLeg.Build("Right", "Hip", "Knee", body, out Transform rightKnee);
+            Transform leftShoulder = leftArm.Build(name, "Left", "Shoulder", "Elbow", torso, out Transform leftElbow);
+            Transform rightShoulder = rightArm.Build(name, "Right", "Shoulder", "Elbow", torso, out Transform rightElbow);
+            Transform leftHip = leftLeg.Build(name, "Left", "Hip", "Knee", body, out Transform leftKnee);
+            Transform rightHip = rightLeg.Build(name, "Right", "Hip", "Knee", body, out Transform rightKnee);
 
             float hipHeight = Mathf.Max(leftHip != null ? leftHip.position.y : 0f, rightHip != null ? rightHip.position.y : 0f);
             var gait = root.AddComponent<ProceduralGait>();
@@ -581,27 +585,199 @@ namespace CharacterPlayground.EditorTools
             public bool IsEmpty => upper.Count == 0 && lower.Count == 0 && end.Count == 0;
             public Vector3 Center => BoundsOf(upper.Concat(lower).Concat(end).ToList()).center;
 
-            /// <summary>Creates the root joint (shoulder or hip) and, with a lower piece, the middle joint (elbow or knee).</summary>
-            public Transform Build(string side, string rootName, string middleName, Transform parent, out Transform middle)
+            /// <summary>
+            /// Creates the root joint (shoulder or hip) and, with a lower piece, the middle joint
+            /// (elbow or knee). Each joint sits at the centre of the rounded cap on top of the piece
+            /// it moves, so the cap turns in its socket instead of swinging out of it.
+            /// </summary>
+            public Transform Build(string character, string side, string rootName, string middleName, Transform parent, out Transform middle)
             {
                 middle = null;
                 if (IsEmpty) return null;
                 List<Transform> top = upper.Count > 0 ? upper : lower.Count > 0 ? lower : end;
                 Bounds topBounds = BoundsOf(top);
-                // A ball joint sits about half the limb's thickness below its top.
-                float thickness = Mathf.Min(topBounds.size.x, topBounds.size.z);
-                var rootPosition = new Vector3(topBounds.center.x, topBounds.max.y - thickness * 0.5f, topBounds.center.z);
+                if (!FitCap(character, side + rootName, top, topBounds, true, out Vector3 rootPosition))
+                {
+                    // A ball joint sits about half the limb's thickness below its top.
+                    float thickness = Mathf.Min(topBounds.size.x, topBounds.size.z);
+                    rootPosition = new Vector3(topBounds.center.x, topBounds.max.y - thickness * 0.5f, topBounds.center.z);
+                }
                 Transform rootJoint = Joint(side + rootName, parent, rootPosition, top);
 
                 if (upper.Count > 0 && lower.Count > 0)
                 {
                     Bounds lowerBounds = BoundsOf(lower);
-                    float y = (topBounds.min.y + lowerBounds.max.y) * 0.5f; // middle of the overlap
-                    middle = Joint(side + middleName, rootJoint, new Vector3(lowerBounds.center.x, y, lowerBounds.center.z), lower);
+                    if (!FitCap(character, side + middleName, lower, lowerBounds, true, out Vector3 middlePosition))
+                    {
+                        float y = (topBounds.min.y + lowerBounds.max.y) * 0.5f; // middle of the overlap
+                        middlePosition = new Vector3(lowerBounds.center.x, y, lowerBounds.center.z);
+                    }
+                    middle = Joint(side + middleName, rootJoint, middlePosition, lower);
                 }
                 if (end.Count > 0 && top != end) Attach(end, middle != null ? middle : rootJoint);
                 return rootJoint;
             }
+        }
+
+        const float CapFraction = 0.35f;
+
+        /// <summary>
+        /// Finds the centre of the rounded end of a piece from its mesh: the top or bottom 35 % of
+        /// its vertices are fitted with a sphere (a dome, like a shoulder) and with a circle in the
+        /// YZ plane (a cylinder across the body, like a hip or a knee), and the better fit wins.
+        /// Fails on pieces without a rounded end, such as plain boxes.
+        /// </summary>
+        static bool FitCap(string character, string joint, List<Transform> parts, Bounds bounds, bool top, out Vector3 center)
+        {
+            center = bounds.center;
+            float cut = top ? bounds.max.y - bounds.size.y * CapFraction : bounds.min.y + bounds.size.y * CapFraction;
+            var points = new List<Vector3>();
+            foreach (Transform part in parts)
+            {
+                foreach (MeshFilter filter in part.GetComponentsInChildren<MeshFilter>(true))
+                {
+                    if (filter.sharedMesh == null) continue;
+                    Matrix4x4 toWorld = filter.transform.localToWorldMatrix;
+                    foreach (Vector3 vertex in filter.sharedMesh.vertices)
+                    {
+                        Vector3 p = toWorld.MultiplyPoint3x4(vertex);
+                        if (top ? p.y >= cut : p.y <= cut) points.Add(p);
+                    }
+                }
+            }
+            if (points.Count < 12) return false;
+
+            bool sphereOk = FitSphere(points, out Vector3 sphereCenter, out float sphereRadius, out float sphereError);
+            bool circleOk = FitCircleYZ(points, out Vector2 circleCenter, out float circleRadius, out float circleError);
+            Vector3 candidate;
+            float radius;
+            string shape;
+            if (sphereOk && (!circleOk || sphereError <= circleError))
+            {
+                candidate = sphereCenter;
+                radius = sphereRadius;
+                shape = "шар";
+            }
+            else if (circleOk)
+            {
+                candidate = new Vector3(bounds.center.x, circleCenter.x, circleCenter.y);
+                radius = circleRadius;
+                shape = "цилиндр";
+            }
+            else return false;
+
+            // Only trust a fit that lands inside the piece with a plausible radius.
+            float extent = Mathf.Max(bounds.size.x, bounds.size.z) * 0.5f;
+            Bounds allowed = bounds;
+            allowed.Expand(bounds.size * 0.5f);
+            if (!allowed.Contains(candidate) || radius < extent * 0.3f || radius > extent * 1.6f) return false;
+
+            center = candidate;
+            Debug.Log($"[Playground] {character}: сустав {joint} — {shape} радиусом {radius:0.000} м в точке {candidate}");
+            return true;
+        }
+
+        /// <summary>Least-squares sphere through the points; error is the RMS distance from its surface over the radius.</summary>
+        static bool FitSphere(List<Vector3> points, out Vector3 center, out float radius, out float error)
+        {
+            // |p|² = 2 c·p + k with k = r² - |c|²; linear in (c, k).
+            var normal = new double[4, 4];
+            var rhs = new double[4];
+            foreach (Vector3 p in points)
+            {
+                double[] row = { 2.0 * p.x, 2.0 * p.y, 2.0 * p.z, 1.0 };
+                double value = (double)p.x * p.x + (double)p.y * p.y + (double)p.z * p.z;
+                for (int i = 0; i < 4; i++)
+                {
+                    for (int j = 0; j < 4; j++) normal[i, j] += row[i] * row[j];
+                    rhs[i] += row[i] * value;
+                }
+            }
+            center = default;
+            radius = 0f;
+            error = float.MaxValue;
+            if (!Solve(normal, rhs, out double[] x)) return false;
+            double r2 = x[3] + x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
+            if (r2 <= 0.0) return false;
+            center = new Vector3((float)x[0], (float)x[1], (float)x[2]);
+            radius = (float)Math.Sqrt(r2);
+            double sum = 0.0;
+            foreach (Vector3 p in points)
+            {
+                double d = Vector3.Distance(p, center) - radius;
+                sum += d * d;
+            }
+            error = (float)(Math.Sqrt(sum / points.Count) / radius);
+            return true;
+        }
+
+        /// <summary>Least-squares circle through the points projected on the YZ plane (a cylinder along X).</summary>
+        static bool FitCircleYZ(List<Vector3> points, out Vector2 center, out float radius, out float error)
+        {
+            var normal = new double[3, 3];
+            var rhs = new double[3];
+            foreach (Vector3 p in points)
+            {
+                double[] row = { 2.0 * p.y, 2.0 * p.z, 1.0 };
+                double value = (double)p.y * p.y + (double)p.z * p.z;
+                for (int i = 0; i < 3; i++)
+                {
+                    for (int j = 0; j < 3; j++) normal[i, j] += row[i] * row[j];
+                    rhs[i] += row[i] * value;
+                }
+            }
+            center = default;
+            radius = 0f;
+            error = float.MaxValue;
+            if (!Solve(normal, rhs, out double[] x)) return false;
+            double r2 = x[2] + x[0] * x[0] + x[1] * x[1];
+            if (r2 <= 0.0) return false;
+            center = new Vector2((float)x[0], (float)x[1]);
+            radius = (float)Math.Sqrt(r2);
+            double sum = 0.0;
+            foreach (Vector3 p in points)
+            {
+                double d = Vector2.Distance(new Vector2(p.y, p.z), center) - radius;
+                sum += d * d;
+            }
+            error = (float)(Math.Sqrt(sum / points.Count) / radius);
+            return true;
+        }
+
+        /// <summary>Gaussian elimination with partial pivoting for the small normal-equation systems above.</summary>
+        static bool Solve(double[,] a, double[] b, out double[] x)
+        {
+            int n = b.Length;
+            x = new double[n];
+            var m = (double[,])a.Clone();
+            var v = (double[])b.Clone();
+            for (int col = 0; col < n; col++)
+            {
+                int pivot = col;
+                for (int row = col + 1; row < n; row++)
+                {
+                    if (Math.Abs(m[row, col]) > Math.Abs(m[pivot, col])) pivot = row;
+                }
+                if (Math.Abs(m[pivot, col]) < 1e-12) return false;
+                if (pivot != col)
+                {
+                    for (int k = 0; k < n; k++) (m[col, k], m[pivot, k]) = (m[pivot, k], m[col, k]);
+                    (v[col], v[pivot]) = (v[pivot], v[col]);
+                }
+                for (int row = col + 1; row < n; row++)
+                {
+                    double factor = m[row, col] / m[col, col];
+                    for (int k = col; k < n; k++) m[row, k] -= factor * m[col, k];
+                    v[row] -= factor * v[col];
+                }
+            }
+            for (int row = n - 1; row >= 0; row--)
+            {
+                double sum = v[row];
+                for (int k = row + 1; k < n; k++) sum -= m[row, k] * x[k];
+                x[row] = sum / m[row, row];
+            }
+            return true;
         }
 
         static Transform Joint(string name, Transform parent, Vector3 worldPosition, List<Transform> parts)
