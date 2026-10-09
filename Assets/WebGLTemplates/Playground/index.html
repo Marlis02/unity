@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
+    <title>{{{ PRODUCT_NAME }}}</title>
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #9ec2e6; }
+      body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; touch-action: none; }
+      #unity-canvas { display: block; width: 100%; height: 100%; background: #9ec2e6; outline: none; }
+      #loader { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #1b1f2a; color: #e8ecf3; }
+      #loader h1 { margin: 0; font-size: 20px; font-weight: 600; }
+      #bar { width: min(320px, 70vw); height: 8px; border-radius: 4px; background: #2e3546; overflow: hidden; }
+      #fill { width: 0; height: 100%; background: #f0b545; transition: width 0.2s; }
+      #status { font-size: 13px; color: #a9b3c6; max-width: 80vw; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="loader">
+      <h1>{{{ PRODUCT_NAME }}}</h1>
+      <div id="bar"><div id="fill"></div></div>
+      <div id="status">Загрузка…</div>
+    </div>
+    <script src="Build/{{{ LOADER_FILENAME }}}"></script>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      var loader = document.querySelector("#loader");
+      var fill = document.querySelector("#fill");
+      var statusText = document.querySelector("#status");
+
+      createUnityInstance(canvas, {
+        arguments: [],
+        dataUrl: "Build/{{{ DATA_FILENAME }}}",
+        frameworkUrl: "Build/{{{ FRAMEWORK_FILENAME }}}",
+#if USE_THREADS
+        workerUrl: "Build/{{{ WORKER_FILENAME }}}",
+#endif
+#if USE_WASM
+        codeUrl: "Build/{{{ CODE_FILENAME }}}",
+#endif
+#if MEMORY_FILENAME
+        memoryUrl: "Build/{{{ MEMORY_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+        symbolsUrl: "Build/{{{ SYMBOLS_FILENAME }}}",
+#endif
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+        productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+        productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+      }, function (progress) {
+        fill.style.width = Math.round(progress * 100) + "%";
+        statusText.textContent = progress < 0.9 ? "Загрузка… " + Math.round(progress * 100) + "%" : "Запуск…";
+      }).then(function () {
+        loader.remove();
+        canvas.focus();
+      }).catch(function (error) {
+        statusText.textContent = "Не удалось запустить: " + error;
+      });
+
+      canvas.addEventListener("pointerdown", function () { canvas.focus(); });
+    </script>
+  </body>
+</html>
