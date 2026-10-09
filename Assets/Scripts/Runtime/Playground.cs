@@ -5,41 +5,41 @@ using UnityEngine.Rendering;
 namespace CharacterPlayground
 {
     /// <summary>
-    /// Entry point of the playground scene: builds camera, light and test course, lists the
-    /// imported characters (Resources/Characters) plus the built-in ones, and draws the HUD
-    /// with live stats and tuning sliders.
+    /// Entry point of the viewer scene: a clean stage with the imported characters
+    /// (Resources/Characters) and the built-in ones, a free camera for touch and mouse, and a
+    /// small menu to pick a character and the motion it shows on the spot. The menu hides
+    /// completely so the frame can be recorded clean.
     /// </summary>
     public class Playground : MonoBehaviour
     {
         public const string CharacterResourcesFolder = "Characters";
+        const float RowGap = 0.6f;
+        const float SpawnLift = 0.05f;
+
+        static readonly CharacterMotion[] Motions = { CharacterMotion.Idle, CharacterMotion.Walk, CharacterMotion.Run, CharacterMotion.Jump };
+        static readonly string[] MotionTitles = { "Покой", "Шаг", "Бег", "Прыжок" };
 
         public Material baseMaterial;
 
         class Entry
         {
             public string name;
+            public bool imported;
             public GameObject prefab;
             public DefaultCharacters.Spec? spec;
-            public CharacterProfile defaults;
-            public CharacterProfile tuned;
+            public CharacterProfile profile;
+            public CharacterMotion motion;
+            public PlayableCharacter instance;
+            public float height;
+            public GameObject label;
         }
 
-        static readonly Vector3 SpawnPosition = new Vector3(0f, 0.05f, 0f);
-        static readonly Vector3 LineupCenter = new Vector3(0f, 0.05f, 4.5f);
-
         readonly List<Entry> entries = new List<Entry>();
-        readonly List<GameObject> lineup = new List<GameObject>();
         Transform charactersRoot;
         OrbitCamera orbit;
-        PlayableCharacter current;
         int currentIndex;
-        float currentHeight;
-        int importedCount;
-
-        bool panelOpen;
-        bool helpVisible = true;
-        bool lineupVisible;
-        float timeScale = 1f;
+        bool showAll = true;
+        bool menuVisible = true;
         float fps;
         float fpsTimer;
         int fpsFrames;
@@ -49,6 +49,7 @@ namespace CharacterPlayground
         GUIStyle titleStyle;
         GUIStyle smallStyle;
         GUIStyle buttonStyle;
+        GUIStyle activeButtonStyle;
         Texture2D panelBackground;
 
         void Awake()
@@ -57,14 +58,13 @@ namespace CharacterPlayground
             if (baseMaterial == null) baseMaterial = new Material(Shader.Find("Standard"));
 
             SetupEnvironment();
-            ArenaBuilder.Build(transform, baseMaterial);
+            StageBuilder.Build(transform, baseMaterial);
             charactersRoot = new GameObject("Characters").transform;
             charactersRoot.SetParent(transform, false);
-            gameObject.AddComponent<TouchControls>();
 
             CollectEntries();
-            panelOpen = !Application.isMobilePlatform && Screen.width >= 900;
-            Select(0);
+            Arrange();
+            FrameCurrent(true);
         }
 
         void OnDestroy()
@@ -82,13 +82,15 @@ namespace CharacterPlayground
             camera.farClipPlane = 400f;
             camera.fieldOfView = 60f;
             orbit = cameraObject.AddComponent<OrbitCamera>();
+            orbit.DoubleTapped += () => FrameCurrent(false);
+            orbit.LongPressed += () => SetMenuVisible(true);
 
             var sun = new GameObject("Sun").AddComponent<Light>();
             sun.type = LightType.Directional;
             sun.intensity = 1.1f;
             sun.shadows = LightShadows.Soft;
             sun.shadowStrength = 0.6f;
-            sun.transform.rotation = Quaternion.Euler(50f, -35f, 0f);
+            sun.transform.rotation = Quaternion.Euler(50f, 145f, 0f); // from the front, where the camera starts
 
             RenderSettings.ambientMode = AmbientMode.Flat;
             RenderSettings.ambientLight = new Color(0.55f, 0.58f, 0.63f);
@@ -108,17 +110,60 @@ namespace CharacterPlayground
                 if (character == null) continue;
                 CharacterProfile profile = character.profile.Clone();
                 if (string.IsNullOrEmpty(profile.displayName)) profile.displayName = prefab.name;
-                entries.Add(new Entry { name = profile.displayName, prefab = prefab, defaults = profile, tuned = profile.Clone() });
+                entries.Add(new Entry { name = profile.displayName, imported = true, prefab = prefab, profile = profile });
             }
-            importedCount = entries.Count;
 
             foreach (var spec in DefaultCharacters.All())
             {
-                entries.Add(new Entry { name = spec.name, spec = spec, defaults = spec.profile.Clone(), tuned = spec.profile.Clone() });
+                entries.Add(new Entry { name = spec.name, spec = spec, profile = spec.profile.Clone() });
             }
         }
 
-        GameObject Spawn(Entry entry, Vector3 position, Quaternion rotation)
+        // ---------------------------------------------------------------- stage
+
+        /// <summary>Puts every character in a row facing the camera, or only the current one.</summary>
+        void Arrange()
+        {
+            foreach (var entry in entries)
+            {
+                if (entry.instance != null) Destroy(entry.instance.gameObject);
+                entry.instance = null;
+                entry.label = null;
+            }
+            if (entries.Count == 0) return;
+
+            if (!showAll)
+            {
+                Spawn(entries[currentIndex], Vector3.zero);
+                return;
+            }
+
+            var widths = new float[entries.Count];
+            var offsets = new float[entries.Count];
+            float total = -RowGap;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                Spawn(entries[i], Vector3.zero);
+                Bounds bounds = CharacterMetrics.CalculateBounds(entries[i].instance.gameObject);
+                widths[i] = Mathf.Max(0.3f, bounds.size.x);
+                offsets[i] = bounds.center.x - entries[i].instance.transform.position.x;
+                total += widths[i] + RowGap;
+            }
+
+            // The camera looks along -Z, so the first character ends up on the left of the screen.
+            float x = total * 0.5f;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                Entry entry = entries[i];
+                Place(entry, new Vector3(x - widths[i] * 0.5f - offsets[i], 0f, 0f));
+                x -= widths[i] + RowGap;
+                entry.label = StageBuilder.Label(entry.instance.transform, new Vector3(offsets[i], entry.height + 0.3f, 0f),
+                    $"{entry.name}\n{entry.height:0.00} м", 0.7f).gameObject;
+                entry.label.SetActive(menuVisible);
+            }
+        }
+
+        void Spawn(Entry entry, Vector3 position)
         {
             GameObject instance = entry.prefab != null
                 ? Instantiate(entry.prefab, charactersRoot)
@@ -126,68 +171,56 @@ namespace CharacterPlayground
             instance.name = entry.name;
             instance.transform.SetParent(charactersRoot, false);
 
-            var character = instance.GetComponent<PlayableCharacter>();
-            character.profile = entry.tuned; // shared, so slider changes survive switching characters
-            character.Teleport(position, rotation);
-            character.SetSpawn(position, rotation);
-            return instance;
+            entry.instance = instance.GetComponent<PlayableCharacter>();
+            entry.instance.profile = entry.profile;
+            entry.instance.motion = entry.motion;
+            Place(entry, position);
+            entry.height = CharacterMetrics.MeasureHeight(instance);
+        }
+
+        static void Place(Entry entry, Vector3 position)
+        {
+            entry.instance.Teleport(position + Vector3.up * SpawnLift, Quaternion.identity);
         }
 
         void Select(int index)
         {
             if (entries.Count == 0) return;
-            index = (index % entries.Count + entries.Count) % entries.Count;
-            if (current != null) Destroy(current.gameObject);
-
-            currentIndex = index;
-            GameObject instance = Spawn(entries[index], SpawnPosition, Quaternion.identity);
-            current = instance.GetComponent<PlayableCharacter>();
-            current.viewTransform = orbit.transform;
-            current.acceptInput = true;
-            currentHeight = CharacterMetrics.MeasureHeight(instance);
-            orbit.Frame(instance.transform, currentHeight);
-
-            if (lineupVisible) BuildLineup();
+            currentIndex = (index % entries.Count + entries.Count) % entries.Count;
+            if (!showAll) Arrange();
+            FrameCurrent(false);
         }
 
-        void ToggleLineup()
+        void FrameCurrent(bool instant)
         {
-            lineupVisible = !lineupVisible;
-            if (lineupVisible) BuildLineup();
-            else ClearLineup();
+            if (entries.Count == 0 || entries[currentIndex].instance == null) return;
+            Entry entry = entries[currentIndex];
+            Bounds bounds = CharacterMetrics.CalculateBounds(entry.instance.gameObject);
+            var point = new Vector3(bounds.center.x, entry.height * 0.55f, bounds.center.z);
+            orbit.Focus(point, Mathf.Max(entry.height, bounds.size.x * 0.8f), true, instant);
         }
 
-        void BuildLineup()
+        void SetMotion(CharacterMotion motion)
         {
-            ClearLineup();
-            var others = new List<Entry>();
-            for (int i = 0; i < entries.Count; i++)
-            {
-                if (i != currentIndex) others.Add(entries[i]);
-            }
-
-            const float spacing = 2.6f;
-            float startX = -(others.Count - 1) * spacing * 0.5f;
-            for (int i = 0; i < others.Count; i++)
-            {
-                Vector3 position = LineupCenter + new Vector3(startX + i * spacing, 0f, 0f);
-                GameObject statue = Spawn(others[i], position, Quaternion.Euler(0f, 180f, 0f));
-                var character = statue.GetComponent<PlayableCharacter>();
-                character.acceptInput = false;
-                character.enabled = false;
-                float height = CharacterMetrics.MeasureHeight(statue);
-                ArenaBuilder.Label(statue.transform, new Vector3(0f, height + 0.45f, 0f), $"{others[i].name}\n{height:0.00} м", 0.8f);
-                lineup.Add(statue);
-            }
+            Entry entry = entries[currentIndex];
+            entry.motion = motion;
+            if (entry.instance != null) entry.instance.motion = motion;
         }
 
-        void ClearLineup()
+        void SetShowAll(bool value)
         {
-            foreach (var statue in lineup)
+            showAll = value;
+            Arrange();
+            FrameCurrent(false);
+        }
+
+        void SetMenuVisible(bool visible)
+        {
+            menuVisible = visible;
+            foreach (var entry in entries)
             {
-                if (statue != null) Destroy(statue);
+                if (entry.label != null) entry.label.SetActive(visible);
             }
-            lineup.Clear();
         }
 
         void Update()
@@ -207,98 +240,64 @@ namespace CharacterPlayground
             {
                 if (Input.GetKeyDown(KeyCode.Alpha1 + i)) Select(i);
             }
-            if (Input.GetKeyDown(KeyCode.R) && current != null) current.Respawn();
-            if (Input.GetKeyDown(KeyCode.L)) ToggleLineup();
-            if (Input.GetKeyDown(KeyCode.H) || Input.GetKeyDown(KeyCode.F1)) helpVisible = !helpVisible;
-            if (Input.GetKeyDown(KeyCode.P)) panelOpen = !panelOpen;
-
-            Time.timeScale = timeScale;
+            if (Input.GetKeyDown(KeyCode.H) || Input.GetKeyDown(KeyCode.F1)) SetMenuVisible(!menuVisible);
+            if (Input.GetKeyDown(KeyCode.L)) SetShowAll(!showAll);
         }
 
-        // ---------------------------------------------------------------- HUD
+        // ---------------------------------------------------------------- menu
 
         void OnGUI()
         {
+            if (!menuVisible || entries.Count == 0) return;
             PlaygroundFont.ApplyToGui();
             EnsureStyles();
-            float scale = Mathf.Clamp(Mathf.Min(Screen.width, Screen.height) / 620f, 1f, 3f);
+            // Phones get a menu about as wide as the screen's short side, big enough for fingers.
+            float shortSide = Mathf.Min(Screen.width, Screen.height);
+            float scale = Application.isMobilePlatform ? Mathf.Max(0.5f, shortSide / 360f) : Mathf.Clamp(shortSide / 620f, 1f, 3f);
             Matrix4x4 previousMatrix = GUI.matrix;
             GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
             float width = Screen.width / scale;
             float height = Screen.height / scale;
 
-            DrawCharacterPanel(scale);
+            DrawMenu(scale, width);
             DrawFps(width);
-            if (helpVisible && !TouchControls.InUse) DrawHelp(height, scale);
+            DrawHelp(width, height, scale);
 
             GUI.matrix = previousMatrix;
         }
 
-        void DrawCharacterPanel(float scale)
+        void DrawMenu(float scale, float screenWidth)
         {
-            if (current == null) return;
-            var area = new Rect(10f, 10f, 310f, panelOpen ? 560f : 178f);
+            Entry entry = entries[currentIndex];
+            var area = new Rect(10f, 10f, Mathf.Min(330f, screenWidth - 20f), 158f);
             PlaygroundInput.RegisterUiRect(new Rect(area.x * scale, area.y * scale, area.width * scale, area.height * scale));
 
             GUILayout.BeginArea(area, panelStyle);
 
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("<", buttonStyle, GUILayout.Width(36f), GUILayout.Height(30f))) Select(currentIndex - 1);
-            GUILayout.Label($"{entries[currentIndex].name}  ({currentIndex + 1}/{entries.Count})", titleStyle, GUILayout.Height(30f));
-            if (GUILayout.Button(">", buttonStyle, GUILayout.Width(36f), GUILayout.Height(30f))) Select(currentIndex + 1);
+            if (GUILayout.Button("<", buttonStyle, GUILayout.Width(38f), GUILayout.Height(32f))) Select(currentIndex - 1);
+            GUILayout.Label($"{entry.name}  ({currentIndex + 1}/{entries.Count})", titleStyle, GUILayout.Height(32f));
+            if (GUILayout.Button(">", buttonStyle, GUILayout.Width(38f), GUILayout.Height(32f))) Select(currentIndex + 1);
             GUILayout.EndHorizontal();
 
-            string source = currentIndex < importedCount ? "свой персонаж" : "встроенный персонаж";
-            GUILayout.Label(source, smallStyle);
-            GUILayout.Label($"Скорость: {current.PlanarSpeed:0.0} м/с    На земле: {(current.Grounded ? "да" : "нет")}", labelStyle);
-            GUILayout.Label($"Рост: {currentHeight:0.00} м    Последний прыжок: {current.LastJumpHeight:0.00} м", labelStyle);
+            GUILayout.Label($"{(entry.imported ? "свой персонаж" : "встроенный")} · рост {entry.height:0.00} м", smallStyle);
 
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button(panelOpen ? "Скрыть" : "Настройки", buttonStyle, GUILayout.Height(28f))) panelOpen = !panelOpen;
-            if (GUILayout.Button(lineupVisible ? "Убрать строй" : "Строй", buttonStyle, GUILayout.Height(28f))) ToggleLineup();
-            if (GUILayout.Button("На старт", buttonStyle, GUILayout.Height(28f))) current.Respawn();
+            for (int i = 0; i < Motions.Length; i++)
+            {
+                GUIStyle style = entry.motion == Motions[i] ? activeButtonStyle : buttonStyle;
+                if (GUILayout.Button(MotionTitles[i], style, GUILayout.Height(34f))) SetMotion(Motions[i]);
+            }
             GUILayout.EndHorizontal();
 
-            if (panelOpen)
-            {
-                CharacterProfile p = current.profile;
-                GUILayout.Space(6f);
-                p.walkSpeed = SliderRow("Ходьба", p.walkSpeed, 0.5f, 15f, "0.0", "м/с");
-                p.runSpeed = SliderRow("Бег", p.runSpeed, 0.5f, 25f, "0.0", "м/с");
-                p.jumpHeight = SliderRow("Высота прыжка", p.jumpHeight, 0f, 6f, "0.00", "м");
-                p.gravity = SliderRow("Гравитация", p.gravity, 2f, 60f, "0.0", "м/с²");
-                p.turnSpeed = SliderRow("Поворот", p.turnSpeed, 60f, 1440f, "0", "°/с");
-                p.acceleration = SliderRow("Разгон", p.acceleration, 2f, 120f, "0", "м/с²");
-                p.airControl = SliderRow("Управление в воздухе", p.airControl, 0f, 1f, "0.00", "");
-                timeScale = SliderRow("Скорость времени", timeScale, 0.1f, 2f, "0.00", "×");
-
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Сбросить", buttonStyle, GUILayout.Height(28f)))
-                {
-                    Entry entry = entries[currentIndex];
-                    entry.tuned = entry.defaults.Clone();
-                    current.profile = entry.tuned;
-                    timeScale = 1f;
-                }
-                if (GUILayout.Button("В консоль (JSON)", buttonStyle, GUILayout.Height(28f)))
-                {
-                    Debug.Log($"[Playground] {entries[currentIndex].name}: {JsonUtility.ToJson(current.profile, true)}");
-                }
-                GUILayout.EndHorizontal();
-            }
-
-            if (importedCount == 0)
-            {
-                GUILayout.Label("Свои модели кладите в Assets/Characters", smallStyle);
-            }
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(showAll ? "Все на сцене" : "Только этот", buttonStyle, GUILayout.Height(34f))) SetShowAll(!showAll);
+            if (GUILayout.Button("К персонажу", buttonStyle, GUILayout.Height(34f))) FrameCurrent(false);
+            if (GUILayout.Button("Скрыть меню", buttonStyle, GUILayout.Height(34f))) SetMenuVisible(false);
+            GUILayout.EndHorizontal();
 
             GUILayout.EndArea();
-        }
-
-        float SliderRow(string title, float value, float min, float max, string format, string unit)
-        {
-            GUILayout.Label($"{title}: {value.ToString(format)} {unit}", smallStyle);
-            return GUILayout.HorizontalSlider(value, min, max, GUILayout.Height(18f));
         }
 
         void DrawFps(float width)
@@ -306,14 +305,16 @@ namespace CharacterPlayground
             GUI.Label(new Rect(width - 90f, 8f, 82f, 22f), $"{fps:0} FPS", smallStyle);
         }
 
-        void DrawHelp(float height, float scale)
+        void DrawHelp(float width, float height, float scale)
         {
-            const string help =
-                "WASD / стрелки — идти,  Shift — бег,  Пробел — прыжок\n" +
-                "Мышь с зажатой кнопкой — камера,  колесо — зум,  Q / E — поворот\n" +
-                "Tab или 1–9 — сменить персонажа,  L — строй для сравнения роста\n" +
-                "R — на старт,  P — настройки,  H — скрыть подсказку";
-            var area = new Rect(10f, height - 94f, 520f, 84f);
+            string help = Input.touchSupported
+                ? "1 палец — вращать  ·  2 пальца — двигать, щипок — зум, поворот пальцев — крутить\n" +
+                  "Двойной тап — к персонажу  ·  долгое нажатие — вернуть меню"
+                : "Левая кнопка — вращать  ·  правая или Shift — двигать  ·  колесо — зум\n" +
+                  "Двойной клик или F — к персонажу  ·  1–9 — выбрать  ·  L — все/один  ·  H — меню";
+            float boxWidth = Mathf.Min(560f, width - 20f);
+            float textHeight = smallStyle.CalcHeight(new GUIContent(help), boxWidth - 20f);
+            var area = new Rect(10f, height - textHeight - 22f, boxWidth, textHeight + 12f);
             PlaygroundInput.RegisterUiRect(new Rect(area.x * scale, area.y * scale, area.width * scale, area.height * scale));
             GUI.Box(area, GUIContent.none, panelStyle);
             GUI.Label(new Rect(area.x + 10f, area.y + 6f, area.width - 20f, area.height - 12f), help, smallStyle);
@@ -338,6 +339,12 @@ namespace CharacterPlayground
             smallStyle.normal.textColor = new Color(0.75f, 0.8f, 0.88f);
 
             buttonStyle = new GUIStyle(GUI.skin.button) { fontSize = 13 };
+
+            activeButtonStyle = new GUIStyle(buttonStyle) { fontStyle = FontStyle.Bold };
+            var amber = new Color(0.98f, 0.76f, 0.3f);
+            activeButtonStyle.normal.textColor = amber;
+            activeButtonStyle.hover.textColor = amber;
+            activeButtonStyle.active.textColor = amber;
         }
     }
 }

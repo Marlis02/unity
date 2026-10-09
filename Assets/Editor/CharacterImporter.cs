@@ -34,15 +34,51 @@ namespace CharacterPlayground.EditorTools
             public float runSpeed = 6f;
             public float jumpHeight = 1.2f;
             public float gravity = 20f;
-            public float turnSpeed = 720f;
-            public float airControl = 0.4f;
-            public float acceleration = 30f;
             [Tooltip("Scale the model to this height in metres; 0 keeps the imported size.")]
             public float height = 0f;
             [Tooltip("Extra rotation around Y if the model does not face +Z.")]
             public float yawOffset = 0f;
             [Tooltip("Model file inside the folder to use; picked automatically when empty.")]
             public string model = "";
+            [Tooltip("Body parts of a model made of separate pieces, to animate it without a skeleton.")]
+            public SegmentConfig segments = new SegmentConfig();
+            [Tooltip("Colours for parts of the model, e.g. when an .obj comes without its .mtl.")]
+            public PartColor[] colors = new PartColor[0];
+        }
+
+        /// <summary>
+        /// Object names (comma separated) of each body part, Roblox R15 style. Hands and feet move
+        /// with the lower arm and leg; anything not listed moves with the body.
+        /// </summary>
+        [Serializable]
+        class SegmentConfig
+        {
+            public string head = "";
+            public string upperTorso = "";
+            public string lowerTorso = "";
+            public string leftUpperArm = "";
+            public string leftLowerArm = "";
+            public string leftHand = "";
+            public string rightUpperArm = "";
+            public string rightLowerArm = "";
+            public string rightHand = "";
+            public string leftUpperLeg = "";
+            public string leftLowerLeg = "";
+            public string leftFoot = "";
+            public string rightUpperLeg = "";
+            public string rightLowerLeg = "";
+            public string rightFoot = "";
+
+            public bool IsEmpty => string.IsNullOrWhiteSpace(head + upperTorso + lowerTorso
+                + leftUpperArm + leftLowerArm + leftHand + rightUpperArm + rightLowerArm + rightHand
+                + leftUpperLeg + leftLowerLeg + leftFoot + rightUpperLeg + rightLowerLeg + rightFoot);
+        }
+
+        [Serializable]
+        class PartColor
+        {
+            public string parts = "";
+            public string color = "#FFFFFF";
         }
 
         [MenuItem("Playground/Import Characters")]
@@ -134,7 +170,7 @@ namespace CharacterPlayground.EditorTools
             if (!clips.ContainsKey(ClipKind.Idle) && others.Count > 0) clips[ClipKind.Idle] = others[0];
 
             AnimatorController controller = clips.Count > 0 ? BuildController(folder, name, clips) : null;
-            return BuildPrefab(name, mainPath, config, avatar, controller);
+            return BuildPrefab(folder, name, mainPath, config, avatar, controller);
         }
 
         static CharacterConfig LoadConfig(string folder)
@@ -342,14 +378,17 @@ namespace CharacterPlayground.EditorTools
             transition.duration = duration;
         }
 
-        static string BuildPrefab(string name, string mainPath, CharacterConfig config, Avatar avatar, AnimatorController controller)
+        static string BuildPrefab(string folder, string name, string mainPath, CharacterConfig config, Avatar avatar, AnimatorController controller)
         {
             var root = new GameObject(name);
             try
             {
                 var source = AssetDatabase.LoadAssetAtPath<GameObject>(mainPath);
                 var model = (GameObject)PrefabUtility.InstantiatePrefab(source);
+                // A plain copy, so body parts can be regrouped under joints.
+                PrefabUtility.UnpackPrefabInstance(model, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
                 model.transform.SetParent(root.transform, false);
+                ApplyColors(folder, name, model, config.colors);
                 model.transform.localPosition = Vector3.zero;
                 model.transform.localRotation = Quaternion.Euler(0f, config.yawOffset, 0f);
 
@@ -379,13 +418,19 @@ namespace CharacterPlayground.EditorTools
                     runSpeed = config.runSpeed,
                     jumpHeight = config.jumpHeight,
                     gravity = config.gravity,
-                    turnSpeed = config.turnSpeed,
-                    airControl = config.airControl,
-                    acceleration = config.acceleration,
                 };
 
+                bool rigged = !config.segments.IsEmpty && BuildSegmentRig(root, model, config.segments, character);
+                if (!rigged && controller == null) LogPartsHint(name, model);
+
                 Animator animator = model.GetComponentInChildren<Animator>();
-                if (animator == null && (controller != null || avatar != null)) animator = model.AddComponent<Animator>();
+                if (animator != null && rigged && controller == null)
+                {
+                    // Joints are swung by ProceduralGait; an empty Animator would only cost time.
+                    UnityEngine.Object.DestroyImmediate(animator);
+                    animator = null;
+                }
+                if (animator == null && controller != null) animator = model.AddComponent<Animator>();
                 if (animator != null)
                 {
                     if (controller != null) animator.runtimeAnimatorController = controller;
@@ -398,15 +443,232 @@ namespace CharacterPlayground.EditorTools
                 string prefabPath = OutputRoot + "/" + name + ".prefab";
                 PrefabUtility.SaveAsPrefabAsset(root, prefabPath, out bool success);
                 if (!success) throw new Exception("SaveAsPrefabAsset failed for " + prefabPath);
+                string animation = controller != null
+                    ? string.Join(", ", controller.animationClips.Select(c => c.name).Distinct())
+                    : rigged ? "процедурная по частям тела" : "нет";
                 Debug.Log($"[Playground] {name}: модель {mainPath}, рост {height:0.00} м, " +
-                          $"скелет {(avatar != null && avatar.isHuman ? "Humanoid" : "Generic")}, " +
-                          $"анимации: {(controller != null ? string.Join(", ", controller.animationClips.Select(c => c.name).Distinct()) : "нет")}");
+                          $"скелет {(avatar != null && avatar.isHuman ? "Humanoid" : "Generic")}, анимации: {animation}");
                 return prefabPath;
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(root);
             }
+        }
+
+        static void ApplyColors(string folder, string name, GameObject model, PartColor[] colors)
+        {
+            if (colors == null || colors.Length == 0) return;
+            string generated = folder + "/" + GeneratedFolderName;
+            EnsureFolder(generated);
+            Dictionary<string, Transform> parts = PartsByName(model);
+            for (int i = 0; i < colors.Length; i++)
+            {
+                if (!ColorUtility.TryParseHtmlString(colors[i].color, out Color color))
+                {
+                    Debug.LogWarning($"[Playground] {name}: не понял цвет \"{colors[i].color}\" — нужен вид #RRGGBB.");
+                    continue;
+                }
+                string path = $"{generated}/{name}-color{i + 1}.mat";
+                AssetDatabase.DeleteAsset(path);
+                var material = new Material(Shader.Find("Standard")) { color = color };
+                material.SetFloat("_Glossiness", 0.2f);
+                AssetDatabase.CreateAsset(material, path);
+
+                foreach (Transform part in FindParts(name, parts, colors[i].parts))
+                {
+                    foreach (Renderer renderer in part.GetComponentsInChildren<Renderer>(true))
+                    {
+                        renderer.sharedMaterials = Enumerable.Repeat(material, renderer.sharedMaterials.Length).ToArray();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Regroups a model made of separate body parts under joints (waist, neck, shoulders,
+        /// elbows, hips, knees) and adds ProceduralGait to swing them.
+        /// </summary>
+        static bool BuildSegmentRig(GameObject root, GameObject model, SegmentConfig segments, PlayableCharacter character)
+        {
+            string name = root.name;
+            Dictionary<string, Transform> parts = PartsByName(model);
+            List<Transform> head = FindParts(name, parts, segments.head);
+            List<Transform> upperTorso = FindParts(name, parts, segments.upperTorso);
+            List<Transform> lowerTorso = FindParts(name, parts, segments.lowerTorso);
+            var leftArm = new Limb(FindParts(name, parts, segments.leftUpperArm), FindParts(name, parts, segments.leftLowerArm), FindParts(name, parts, segments.leftHand));
+            var rightArm = new Limb(FindParts(name, parts, segments.rightUpperArm), FindParts(name, parts, segments.rightLowerArm), FindParts(name, parts, segments.rightHand));
+            var leftLeg = new Limb(FindParts(name, parts, segments.leftUpperLeg), FindParts(name, parts, segments.leftLowerLeg), FindParts(name, parts, segments.leftFoot));
+            var rightLeg = new Limb(FindParts(name, parts, segments.rightUpperLeg), FindParts(name, parts, segments.rightLowerLeg), FindParts(name, parts, segments.rightFoot));
+            if (leftArm.IsEmpty && rightArm.IsEmpty && leftLeg.IsEmpty && rightLeg.IsEmpty)
+            {
+                Debug.LogWarning($"[Playground] {name}: в segments не найдено ни одной руки или ноги — анимации не будет.");
+                return false;
+            }
+
+            // The character faces +Z, so its left is -X; swap sides that were named the other way round.
+            if (!leftArm.IsEmpty && !rightArm.IsEmpty && leftArm.Center.x > rightArm.Center.x)
+            {
+                (leftArm, rightArm) = (rightArm, leftArm);
+                Debug.LogWarning($"[Playground] {name}: левая и правая рука перепутаны в segments — поменял местами.");
+            }
+            if (!leftLeg.IsEmpty && !rightLeg.IsEmpty && leftLeg.Center.x > rightLeg.Center.x)
+            {
+                (leftLeg, rightLeg) = (rightLeg, leftLeg);
+                Debug.LogWarning($"[Playground] {name}: левая и правая нога перепутаны в segments — поменял местами.");
+            }
+
+            var body = new GameObject("Body").transform;
+            body.SetParent(root.transform, false);
+            model.transform.SetParent(body, true);
+            Attach(lowerTorso, body);
+
+            Transform chest = null;
+            if (upperTorso.Count > 0)
+            {
+                Bounds upper = BoundsOf(upperTorso);
+                float waistY = lowerTorso.Count > 0 ? BoundsOf(lowerTorso).max.y : upper.min.y + upper.size.y * 0.15f;
+                chest = Joint("Waist", body, new Vector3(upper.center.x, waistY, upper.center.z), upperTorso);
+            }
+            Transform torso = chest != null ? chest : body;
+
+            Transform neck = null;
+            if (head.Count > 0)
+            {
+                // Hair and hats listed with the head often reach lower than the head itself; use the lowest piece.
+                Bounds headBounds = BoundsOf(head);
+                Bounds main = BoundsOf(head.Take(1).ToList());
+                neck = Joint("Neck", torso, new Vector3(main.center.x, Mathf.Min(main.min.y, headBounds.min.y), main.center.z), head);
+            }
+
+            Transform leftShoulder = leftArm.Build("Left", "Shoulder", "Elbow", torso, out Transform leftElbow);
+            Transform rightShoulder = rightArm.Build("Right", "Shoulder", "Elbow", torso, out Transform rightElbow);
+            Transform leftHip = leftLeg.Build("Left", "Hip", "Knee", body, out Transform leftKnee);
+            Transform rightHip = rightLeg.Build("Right", "Hip", "Knee", body, out Transform rightKnee);
+
+            float hipHeight = Mathf.Max(leftHip != null ? leftHip.position.y : 0f, rightHip != null ? rightHip.position.y : 0f);
+            var gait = root.AddComponent<ProceduralGait>();
+            gait.character = character;
+            gait.body = body;
+            gait.chest = chest;
+            gait.head = neck;
+            gait.leftArm = leftShoulder;
+            gait.rightArm = rightShoulder;
+            gait.leftForearm = leftElbow;
+            gait.rightForearm = rightElbow;
+            gait.leftLeg = leftHip;
+            gait.rightLeg = rightHip;
+            gait.leftShin = leftKnee;
+            gait.rightShin = rightKnee;
+            gait.strideLength = Mathf.Max(0.2f, hipHeight * 1.4f);
+            return true;
+        }
+
+        /// <summary>An arm or a leg: upper piece, lower piece and hand or foot.</summary>
+        class Limb
+        {
+            readonly List<Transform> upper;
+            readonly List<Transform> lower;
+            readonly List<Transform> end;
+
+            public Limb(List<Transform> upper, List<Transform> lower, List<Transform> end)
+            {
+                this.upper = upper;
+                this.lower = lower;
+                this.end = end;
+            }
+
+            public bool IsEmpty => upper.Count == 0 && lower.Count == 0 && end.Count == 0;
+            public Vector3 Center => BoundsOf(upper.Concat(lower).Concat(end).ToList()).center;
+
+            /// <summary>Creates the root joint (shoulder or hip) and, with a lower piece, the middle joint (elbow or knee).</summary>
+            public Transform Build(string side, string rootName, string middleName, Transform parent, out Transform middle)
+            {
+                middle = null;
+                if (IsEmpty) return null;
+                List<Transform> top = upper.Count > 0 ? upper : lower.Count > 0 ? lower : end;
+                Bounds topBounds = BoundsOf(top);
+                // A ball joint sits about half the limb's thickness below its top.
+                float thickness = Mathf.Min(topBounds.size.x, topBounds.size.z);
+                var rootPosition = new Vector3(topBounds.center.x, topBounds.max.y - thickness * 0.5f, topBounds.center.z);
+                Transform rootJoint = Joint(side + rootName, parent, rootPosition, top);
+
+                if (upper.Count > 0 && lower.Count > 0)
+                {
+                    Bounds lowerBounds = BoundsOf(lower);
+                    float y = (topBounds.min.y + lowerBounds.max.y) * 0.5f; // middle of the overlap
+                    middle = Joint(side + middleName, rootJoint, new Vector3(lowerBounds.center.x, y, lowerBounds.center.z), lower);
+                }
+                if (end.Count > 0 && top != end) Attach(end, middle != null ? middle : rootJoint);
+                return rootJoint;
+            }
+        }
+
+        static Transform Joint(string name, Transform parent, Vector3 worldPosition, List<Transform> parts)
+        {
+            var joint = new GameObject(name).transform;
+            joint.SetParent(parent, false);
+            joint.position = worldPosition;
+            joint.rotation = parent.root.rotation;
+            Attach(parts, joint);
+            return joint;
+        }
+
+        static void Attach(List<Transform> parts, Transform parent)
+        {
+            foreach (Transform part in parts) part.SetParent(parent, true);
+        }
+
+        static Bounds BoundsOf(List<Transform> parts)
+        {
+            var bounds = new Bounds();
+            bool found = false;
+            foreach (Transform part in parts)
+            {
+                foreach (Renderer renderer in part.GetComponentsInChildren<Renderer>(true))
+                {
+                    if (!found) bounds = renderer.bounds;
+                    else bounds.Encapsulate(renderer.bounds);
+                    found = true;
+                }
+            }
+            return bounds;
+        }
+
+        static Dictionary<string, Transform> PartsByName(GameObject model)
+        {
+            var parts = new Dictionary<string, Transform>(StringComparer.OrdinalIgnoreCase);
+            foreach (Transform t in model.GetComponentsInChildren<Transform>(true))
+            {
+                if (t != model.transform && !parts.ContainsKey(t.name)) parts[t.name] = t;
+            }
+            return parts;
+        }
+
+        static List<Transform> FindParts(string character, Dictionary<string, Transform> parts, string names)
+        {
+            var found = new List<Transform>();
+            if (string.IsNullOrWhiteSpace(names)) return found;
+            foreach (string raw in names.Split(','))
+            {
+                string partName = raw.Trim();
+                if (partName.Length == 0) continue;
+                if (parts.TryGetValue(partName, out Transform part)) found.Add(part);
+                else Debug.LogWarning($"[Playground] {character}: в модели нет части \"{partName}\". Есть: {string.Join(", ", parts.Keys)}");
+            }
+            return found;
+        }
+
+        /// <summary>Lists the pieces of a model without animations, to help write "segments" for it.</summary>
+        static void LogPartsHint(string name, GameObject model)
+        {
+            Renderer[] renderers = model.GetComponentsInChildren<Renderer>(true);
+            if (renderers.Length < 2) return;
+            IEnumerable<string> lines = renderers
+                .OrderByDescending(r => r.bounds.center.y)
+                .Select(r => $"{r.name}: центр ({r.bounds.center.x:0.00}, {r.bounds.center.y:0.00}, {r.bounds.center.z:0.00}), размер ({r.bounds.size.x:0.00}, {r.bounds.size.y:0.00}, {r.bounds.size.z:0.00})");
+            Debug.Log($"[Playground] {name}: анимаций нет, модель из {renderers.Length} частей. " +
+                      "Чтобы оживить её, перечислите части в \"segments\" в character.json:\n" + string.Join("\n", lines));
         }
 
         static Avatar LoadAvatar(string modelPath)

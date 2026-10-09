@@ -4,8 +4,8 @@ using UnityEngine;
 namespace CharacterPlayground
 {
     /// <summary>
-    /// Tunable movement stats of a character. Loaded from character.json for imported
-    /// characters and editable at runtime from the playground's tuning panel.
+    /// Stats that set how a character's motions look: the pace of walking and running in place
+    /// and the height and speed of its jumps. Loaded from character.json for imported characters.
     /// </summary>
     [Serializable]
     public class CharacterProfile
@@ -15,9 +15,6 @@ namespace CharacterPlayground
         public float runSpeed = 6f;
         public float jumpHeight = 1.2f;
         public float gravity = 20f;
-        public float turnSpeed = 720f;
-        [Range(0f, 1f)] public float airControl = 0.4f;
-        public float acceleration = 30f;
 
         public CharacterProfile Clone()
         {

@@ -32,3 +32,6 @@
 # Character prefabs generated from Assets/Characters by CharacterImporter on every build
 /Assets/Resources/Characters/
 /Assets/Resources/Characters.meta
+# Animator controllers and materials CharacterImporter generates next to each character
+/Assets/Characters/*/Generated/
+/Assets/Characters/*/Generated.meta

@@ -1,0 +1,32 @@
+{
+  "displayName": "Бекон",
+  "height": 1.6,
+  "yawOffset": 180,
+  "walkSpeed": 4.5,
+  "runSpeed": 7,
+  "jumpHeight": 1.5,
+  "gravity": 40,
+  "segments": {
+    "head": "Rig10, Handle1",
+    "upperTorso": "Rig15",
+    "lowerTorso": "Rig14",
+    "leftUpperArm": "Rig9",
+    "leftLowerArm": "Rig8",
+    "leftHand": "Rig7",
+    "rightUpperArm": "Rig13",
+    "rightLowerArm": "Rig12",
+    "rightHand": "Rig11",
+    "leftUpperLeg": "Rig6",
+    "leftLowerLeg": "Rig5",
+    "leftFoot": "Rig4",
+    "rightUpperLeg": "Rig3",
+    "rightLowerLeg": "Rig2",
+    "rightFoot": "Rig1"
+  },
+  "colors": [
+    { "parts": "Rig10, Rig7, Rig8, Rig9, Rig11, Rig12, Rig13", "color": "#F5CD30" },
+    { "parts": "Rig14, Rig15", "color": "#0D69AC" },
+    { "parts": "Rig1, Rig2, Rig3, Rig4, Rig5, Rig6", "color": "#A4BD47" },
+    { "parts": "Handle1", "color": "#7B4A2A" }
+  ]
+}

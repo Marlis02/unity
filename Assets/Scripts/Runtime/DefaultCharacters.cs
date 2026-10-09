@@ -34,7 +34,7 @@ namespace CharacterPlayground
                 color = new Color(0.2f, 0.7f, 0.35f),
                 height = 1.6f,
                 width = 0.42f,
-                profile = new CharacterProfile { displayName = "Скаут", walkSpeed = 4f, runSpeed = 9f, jumpHeight = 1.0f, gravity = 22f, turnSpeed = 1080f, acceleration = 45f },
+                profile = new CharacterProfile { displayName = "Скаут", walkSpeed = 4f, runSpeed = 9f, jumpHeight = 1.0f, gravity = 22f },
             };
             yield return new Spec
             {
@@ -42,7 +42,7 @@ namespace CharacterPlayground
                 color = new Color(0.55f, 0.45f, 0.35f),
                 height = 2.5f,
                 width = 1.0f,
-                profile = new CharacterProfile { displayName = "Голем", walkSpeed = 2f, runSpeed = 4f, jumpHeight = 0.6f, gravity = 28f, turnSpeed = 300f, acceleration = 12f, airControl = 0.1f },
+                profile = new CharacterProfile { displayName = "Голем", walkSpeed = 2f, runSpeed = 4f, jumpHeight = 0.6f, gravity = 28f },
             };
             yield return new Spec
             {
@@ -50,7 +50,7 @@ namespace CharacterPlayground
                 color = new Color(0.95f, 0.55f, 0.15f),
                 height = 1.35f,
                 width = 0.45f,
-                profile = new CharacterProfile { displayName = "Прыгун", walkSpeed = 3.5f, runSpeed = 6.5f, jumpHeight = 2.8f, gravity = 14f, airControl = 0.8f },
+                profile = new CharacterProfile { displayName = "Прыгун", walkSpeed = 3.5f, runSpeed = 6.5f, jumpHeight = 2.8f, gravity = 14f },
             };
         }
 
