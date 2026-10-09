@@ -546,10 +546,13 @@ namespace CharacterPlayground.EditorTools
                 neck = Joint("Neck", torso, new Vector3(main.center.x, Mathf.Min(main.min.y, headBounds.min.y), main.center.z), head);
             }
 
-            Transform leftShoulder = leftArm.Build(name, "Left", "Shoulder", "Elbow", torso, out Transform leftElbow);
-            Transform rightShoulder = rightArm.Build(name, "Right", "Shoulder", "Elbow", torso, out Transform rightElbow);
-            Transform leftHip = leftLeg.Build(name, "Left", "Hip", "Knee", body, out Transform leftKnee);
-            Transform rightHip = rightLeg.Build(name, "Right", "Hip", "Knee", body, out Transform rightKnee);
+            Bounds modelBounds = CharacterMetrics.CalculateBounds(model);
+            Bounds armSocket = upperTorso.Count > 0 ? BoundsOf(upperTorso) : modelBounds;
+            Bounds legSocket = lowerTorso.Count > 0 ? BoundsOf(lowerTorso) : upperTorso.Count > 0 ? BoundsOf(upperTorso) : modelBounds;
+            Transform leftShoulder = leftArm.Build(name, "Left", "Shoulder", "Elbow", torso, armSocket, out Transform leftElbow);
+            Transform rightShoulder = rightArm.Build(name, "Right", "Shoulder", "Elbow", torso, armSocket, out Transform rightElbow);
+            Transform leftHip = leftLeg.Build(name, "Left", "Hip", "Knee", body, legSocket, out Transform leftKnee);
+            Transform rightHip = rightLeg.Build(name, "Right", "Hip", "Knee", body, legSocket, out Transform rightKnee);
 
             float hipHeight = Mathf.Max(leftHip != null ? leftHip.position.y : 0f, rightHip != null ? rightHip.position.y : 0f);
             var gait = root.AddComponent<ProceduralGait>();
@@ -591,7 +594,7 @@ namespace CharacterPlayground.EditorTools
             /// (elbow or knee). Each joint sits at the centre of the rounded cap on top of the piece
             /// it moves, so the cap turns in its socket instead of swinging out of it.
             /// </summary>
-            public Transform Build(string character, string side, string rootName, string middleName, Transform parent, out Transform middle)
+            public Transform Build(string character, string side, string rootName, string middleName, Transform parent, Bounds socket, out Transform middle)
             {
                 middle = null;
                 if (IsEmpty) return null;
@@ -606,8 +609,11 @@ namespace CharacterPlayground.EditorTools
                 }
                 Transform rootJoint = Joint(side + rootName, parent, rootPosition, top);
                 // A thigh's chamfered top shows behind the hip when the leg swings; a smooth roller hides it.
+                // A shoulder's dome is flat on the side that rests against the torso, and that flat side turns
+                // out into the armpit when the arm lifts; a ball around the dome keeps the shoulder round.
                 CapExtents(top, topBounds, true, out float topWidth, out float topDepth, out float topEndWidth);
-                AddRoller(character, side + rootName, rootJoint, rootPosition, rootRadius, top, topWidth, topDepth, topEndWidth, topWidth, topDepth);
+                if (topEndWidth >= topWidth * 0.8f) AddRoller(character, side + rootName, rootJoint, rootPosition, rootRadius, top, topWidth, topDepth, topEndWidth, topWidth, topDepth);
+                else AddBall(character, side + rootName, rootJoint, rootPosition, top, topBounds, socket);
 
                 if (upper.Count > 0 && lower.Count > 0)
                 {
@@ -746,6 +752,33 @@ namespace CharacterPlayground.EditorTools
             Renderer skin = piece[0].GetComponentInChildren<Renderer>(true);
             if (skin != null) roller.GetComponent<Renderer>().sharedMaterial = skin.sharedMaterial;
             Debug.Log($"[Playground] {character}: ролик {joint} — радиус {r:0.000} м, ширина {halfLength * 2f:0.000} м");
+        }
+
+        /// <summary>
+        /// A smooth ball around the dome at the end of a piece, centred on the joint: it replaces
+        /// the dome's facets with a round surface and, where the dome is cut flat against the
+        /// body (a shoulder), fills the cut so nothing flat shows when the piece turns away. The
+        /// half inside the body stays hidden there, so the ball must fit inside the body.
+        /// </summary>
+        static void AddBall(string character, string joint, Transform parent, Vector3 center, List<Transform> piece, Bounds bounds, Bounds socket)
+        {
+            float radius = 0f;
+            foreach (Vector3 p in CapPoints(piece, bounds, true)) radius = Mathf.Max(radius, Vector3.Distance(p, center));
+            radius *= 0.99f;
+            if (radius <= 0f || radius > socket.size.z * 0.5f || radius > socket.size.y * 0.5f)
+            {
+                Debug.Log($"[Playground] {character}: сустав {joint} без шара — не помещается в торсе.");
+                return;
+            }
+            var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            ball.name = joint + "Ball";
+            UnityEngine.Object.DestroyImmediate(ball.GetComponent<Collider>());
+            ball.transform.SetParent(parent, false);
+            ball.transform.SetPositionAndRotation(center, parent.root.rotation);
+            ball.transform.localScale = Vector3.one * (radius * 2f);
+            Renderer skin = piece[0].GetComponentInChildren<Renderer>(true);
+            if (skin != null) ball.GetComponent<Renderer>().sharedMaterial = skin.sharedMaterial;
+            Debug.Log($"[Playground] {character}: шар {joint} — радиус {radius:0.000} м");
         }
 
         /// <summary>
