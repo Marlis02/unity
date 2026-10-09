@@ -219,6 +219,7 @@ namespace CharacterPlayground
 
         void OnGUI()
         {
+            PlaygroundFont.ApplyToGui();
             EnsureStyles();
             float scale = Mathf.Clamp(Mathf.Min(Screen.width, Screen.height) / 620f, 1f, 3f);
             Matrix4x4 previousMatrix = GUI.matrix;

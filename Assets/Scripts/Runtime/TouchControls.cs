@@ -105,6 +105,7 @@ namespace CharacterPlayground
         void OnGUI()
         {
             if (!active || Event.current.type != EventType.Repaint) return;
+            PlaygroundFont.ApplyToGui();
             if (buttonLabel == null)
             {
                 buttonLabel = new GUIStyle(GUI.skin.label)

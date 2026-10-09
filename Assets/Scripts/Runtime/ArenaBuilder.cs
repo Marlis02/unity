@@ -9,8 +9,6 @@ namespace CharacterPlayground
     /// </summary>
     public static class ArenaBuilder
     {
-        static Font labelFont;
-
         public static Transform Build(Transform parent, Material baseMaterial)
         {
             var root = new GameObject("Arena").transform;
@@ -169,7 +167,7 @@ namespace CharacterPlayground
 
         public static TextMesh Label(Transform parent, Vector3 position, string text, float scale)
         {
-            if (labelFont == null) labelFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            Font labelFont = PlaygroundFont.Get();
             var go = new GameObject("Label");
             go.transform.SetParent(parent, false);
             go.transform.localPosition = position;

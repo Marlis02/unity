@@ -120,7 +120,8 @@ namespace CharacterPlayground
 
             if (groundedBeforeMove && verticalSpeed < 0f) verticalSpeed = -2f;
 
-            bool canJump = Time.time - lastGroundedTime <= CoyoteTime && !jumping;
+            // Standing on the ground always counts: below 10 FPS one frame outlasts the coyote window.
+            bool canJump = !jumping && (groundedBeforeMove || Time.time - lastGroundedTime <= CoyoteTime);
             if (jumpPressed && canJump)
             {
                 verticalSpeed = profile.JumpVelocity;
