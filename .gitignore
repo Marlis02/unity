@@ -28,3 +28,7 @@
 /.unity-license/
 *.ulf
 *.alf
+
+# Character prefabs generated from Assets/Characters by CharacterImporter on every build
+/Assets/Resources/Characters/
+/Assets/Resources/Characters.meta
