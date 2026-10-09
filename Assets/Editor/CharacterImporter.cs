@@ -562,11 +562,11 @@ namespace CharacterPlayground.EditorTools
             if (neck != null) bones.Add(neck);
             Bounds armSocket = upperTorso.Count > 0 ? BoundsOf(upperTorso) : CharacterMetrics.CalculateBounds(model);
             Bounds legSocket = lowerTorso.Count > 0 ? BoundsOf(lowerTorso) : armSocket;
-            // Shoulders: nearly rigid, turning inside the torso. Hips: the thigh's top already sits inside the pelvis.
-            Transform leftShoulder = leftArm.Build(name, "Left", "Shoulder", "Elbow", torso, blends, bones, softness, ShoulderSoftness, ShoulderInset, armSocket, out Transform leftElbow);
-            Transform rightShoulder = rightArm.Build(name, "Right", "Shoulder", "Elbow", torso, blends, bones, softness, ShoulderSoftness, ShoulderInset, armSocket, out Transform rightElbow);
-            Transform leftHip = leftLeg.Build(name, "Left", "Hip", "Knee", body, blends, bones, softness, 1f, 0f, legSocket, out Transform leftKnee);
-            Transform rightHip = rightLeg.Build(name, "Right", "Hip", "Knee", body, blends, bones, softness, 1f, 0f, legSocket, out Transform rightKnee);
+            // Shoulders: rigid, turning on the side of the torso near the top of the arm. Hips: blended, the thigh's top already sits inside the pelvis.
+            Transform leftShoulder = leftArm.Build(name, "Left", "Shoulder", "Elbow", torso, blends, bones, softness, ShoulderSoftness, true, ShoulderLift, armSocket, out Transform leftElbow);
+            Transform rightShoulder = rightArm.Build(name, "Right", "Shoulder", "Elbow", torso, blends, bones, softness, ShoulderSoftness, true, ShoulderLift, armSocket, out Transform rightElbow);
+            Transform leftHip = leftLeg.Build(name, "Left", "Hip", "Knee", body, blends, bones, softness, 1f, false, 0f, legSocket, out Transform leftKnee);
+            Transform rightHip = rightLeg.Build(name, "Right", "Hip", "Knee", body, blends, bones, softness, 1f, false, 0f, legSocket, out Transform rightKnee);
 
             // How much to round each piece: body and limbs fully, hands and feet a little less; the
             // head, hats and hair not at all (a face has small details that welding would damage).
@@ -836,7 +836,7 @@ namespace CharacterPlayground.EditorTools
             /// records the skin blend zone of each joint, as long as that end is round.
             /// </summary>
             public Transform Build(string character, string side, string rootName, string middleName, Transform parent, List<Blend> blends, List<Transform> bones,
-                float softness, float rootSoftness, float rootInset, Bounds socket, out Transform middle)
+                float softness, float rootSoftness, bool rootOnSocket, float rootLift, Bounds socket, out Transform middle)
             {
                 middle = null;
                 if (IsEmpty) return null;
@@ -849,9 +849,15 @@ namespace CharacterPlayground.EditorTools
                     rootPosition = new Vector3(topBounds.center.x, topBounds.max.y - thickness * 0.5f, topBounds.center.z);
                     rootRadius = thickness * 0.5f;
                 }
-                // A shoulder turns around a point a little inside the torso, so the root of the arm
-                // swings into the body and stays hidden instead of showing its flat side in the armpit.
-                if (rootInset > 0f) rootPosition.x += Mathf.Sign(socket.center.x - rootPosition.x) * rootRadius * rootInset;
+                if (rootOnSocket)
+                {
+                    // A shoulder turns on the side of the torso, near the top of the arm, as the joint of
+                    // the original model does: the flat inner side of the arm then swings around its own
+                    // plane and becomes the underside of a raised arm, the rounded top swings into the
+                    // body, and nothing of the root is left outside to show a cut or a bulge.
+                    rootPosition.x = socket.center.x + Mathf.Sign(rootPosition.x - socket.center.x) * socket.extents.x;
+                    rootPosition.y = Mathf.Lerp(rootPosition.y, topBounds.max.y, rootLift);
+                }
                 Transform rootJoint = Joint(side + rootName, parent, rootPosition, top);
 
                 Vector3 middlePosition = rootPosition;
@@ -870,10 +876,13 @@ namespace CharacterPlayground.EditorTools
                 if (end.Count > 0 && top != end) Attach(end, middle != null ? middle : rootJoint);
 
                 Vector3 axis = middle != null ? (middlePosition - rootPosition).normalized : Vector3.down;
-                Transform rootMid = HalfJointOf(rootJoint, parent, rootPosition);
                 bones.Add(rootJoint);
-                bones.Add(rootMid);
-                blends.Add(new Blend(parent, rootMid, rootJoint, rootPosition, axis, rootRadius * softness * rootSoftness, false));
+                if (rootSoftness > 0f)
+                {
+                    Transform rootMid = HalfJointOf(rootJoint, parent, rootPosition);
+                    bones.Add(rootMid);
+                    blends.Add(new Blend(parent, rootMid, rootJoint, rootPosition, axis, rootRadius * softness * rootSoftness, false));
+                }
                 if (middle != null)
                 {
                     Transform middleMid = HalfJointOf(middle, rootJoint, middlePosition);
@@ -886,8 +895,11 @@ namespace CharacterPlayground.EditorTools
         }
 
         const float CapFraction = 0.3f;
-        const float ShoulderSoftness = 0.3f; // share of the usual blend zone at a shoulder
-        const float ShoulderInset = 0.4f;    // how far into the torso a shoulder pivot moves, in root radii
+        // A shoulder is rigid: skin blended between the torso and a raised arm has nowhere to go
+        // but outside the body, where it hangs as a pouch or a lip. The arm turns as one piece
+        // around a point on the side of the torso, near its top (see Limb.Build).
+        const float ShoulderSoftness = 0f; // share of the usual blend zone at a shoulder; 0 is rigid
+        const float ShoulderLift = 0.6f;   // where the pivot sits between the arm's fitted cap centre (0) and its top (1)
 
         /// <summary>
         /// Pivot for the rounded end of a piece, from its mesh: the point on the piece's axis that
