@@ -401,7 +401,8 @@ namespace CharacterPlayground.EditorTools
 
                 bounds = CharacterMetrics.CalculateBounds(model);
                 height = Mathf.Max(0.3f, bounds.size.y);
-                model.transform.localPosition -= new Vector3(0f, bounds.min.y, 0f); // feet on the ground
+                // Feet on the ground, body centred under the root (exports keep their world offset).
+                model.transform.localPosition -= new Vector3(bounds.center.x, bounds.min.y, bounds.center.z);
 
                 var characterController = root.AddComponent<CharacterController>();
                 characterController.height = height;
@@ -527,7 +528,7 @@ namespace CharacterPlayground.EditorTools
             if (upperTorso.Count > 0)
             {
                 Bounds upper = BoundsOf(upperTorso);
-                if (!FitCap(name, "Waist", upperTorso, upper, false, out Vector3 waist))
+                if (!FitCap(name, "Waist", upperTorso, upper, false, out Vector3 waist, out _))
                 {
                     float waistY = lowerTorso.Count > 0 ? (upper.min.y + BoundsOf(lowerTorso).max.y) * 0.5f : upper.min.y + upper.size.y * 0.15f;
                     waist = new Vector3(upper.center.x, waistY, upper.center.z);
@@ -596,18 +597,29 @@ namespace CharacterPlayground.EditorTools
                 if (IsEmpty) return null;
                 List<Transform> top = upper.Count > 0 ? upper : lower.Count > 0 ? lower : end;
                 Bounds topBounds = BoundsOf(top);
-                if (!FitCap(character, side + rootName, top, topBounds, true, out Vector3 rootPosition))
+                if (!FitCap(character, side + rootName, top, topBounds, true, out Vector3 rootPosition, out float rootRadius))
                 {
                     // A ball joint sits about half the limb's thickness below its top.
                     float thickness = Mathf.Min(topBounds.size.x, topBounds.size.z);
                     rootPosition = new Vector3(topBounds.center.x, topBounds.max.y - thickness * 0.5f, topBounds.center.z);
+                    rootRadius = thickness * 0.5f;
                 }
                 Transform rootJoint = Joint(side + rootName, parent, rootPosition, top);
+                // A thigh's chamfered top shows behind the hip when the leg swings; a smooth roller hides it.
+                CapExtents(top, topBounds, true, out float topWidth, out float topDepth, out float topEndWidth);
+                AddRoller(character, side + rootName, rootJoint, rootPosition, rootRadius, top, topWidth, topDepth, topEndWidth, topWidth, topDepth);
 
                 if (upper.Count > 0 && lower.Count > 0)
                 {
                     Bounds lowerBounds = BoundsOf(lower);
-                    if (!FitCap(character, side + middleName, lower, lowerBounds, true, out Vector3 middlePosition))
+                    // The chamfered end of the upper piece gets a roller before the lower piece is re-parented.
+                    if (FitCap(character, side + middleName + "Cap", upper, topBounds, false, out Vector3 capCenter, out float capRadius))
+                    {
+                        CapExtents(upper, topBounds, false, out float upperWidth, out float upperDepth, out float upperEndWidth);
+                        CapExtents(lower, lowerBounds, true, out float lowerWidth, out float lowerDepth, out _);
+                        AddRoller(character, side + middleName, rootJoint, capCenter, capRadius, upper, upperWidth, upperDepth, upperEndWidth, lowerWidth, lowerDepth);
+                    }
+                    if (!FitCap(character, side + middleName, lower, lowerBounds, true, out Vector3 middlePosition, out _))
                     {
                         float y = (topBounds.min.y + lowerBounds.max.y) * 0.5f; // middle of the overlap
                         middlePosition = new Vector3(lowerBounds.center.x, y, lowerBounds.center.z);
@@ -619,17 +631,49 @@ namespace CharacterPlayground.EditorTools
             }
         }
 
-        const float CapFraction = 0.35f;
+        const float CapFraction = 0.3f;
 
         /// <summary>
-        /// Finds the centre of the rounded end of a piece from its mesh: the top or bottom 35 % of
-        /// its vertices are fitted with a sphere (a dome, like a shoulder) and with a circle in the
-        /// YZ plane (a cylinder across the body, like a hip or a knee), and the better fit wins.
-        /// Fails on pieces without a rounded end, such as plain boxes.
+        /// Pivot for the rounded end of a piece, from its mesh: the point on the piece's axis that
+        /// keeps the end's vertices closest (the smallest enclosing circle in the YZ plane), so a
+        /// swing around it sweeps the smallest cylinder and the end stays inside its socket. The
+        /// X of the pivot is found the same way in the XY plane for sideways swings. Fails on
+        /// pieces without a rounded end, such as plain boxes.
         /// </summary>
-        static bool FitCap(string character, string joint, List<Transform> parts, Bounds bounds, bool top, out Vector3 center)
+        static bool FitCap(string character, string joint, List<Transform> parts, Bounds bounds, bool top, out Vector3 center, out float radius)
         {
             center = bounds.center;
+            radius = 0f;
+            List<Vector3> points = CapPoints(parts, bounds, top);
+            if (points.Count < 8) return false;
+
+            float minZ = float.MaxValue, maxZ = float.MinValue, minX = float.MaxValue, maxX = float.MinValue;
+            foreach (Vector3 p in points)
+            {
+                minZ = Mathf.Min(minZ, p.z); maxZ = Mathf.Max(maxZ, p.z);
+                minX = Mathf.Min(minX, p.x); maxX = Mathf.Max(maxX, p.x);
+            }
+            float zc = (minZ + maxZ) * 0.5f;
+            float low = bounds.min.y - bounds.size.y, high = bounds.max.y + bounds.size.y;
+            float cy = Minimise(low, high, y => Reach(points, 1, 2, y, zc));
+            radius = Reach(points, 1, 2, cy, zc);
+            float cx = Minimise(minX - bounds.size.x, maxX + bounds.size.x, x => Reach(points, 0, 1, x, cy));
+
+            // Only trust a fit that lands inside the piece with a plausible radius.
+            float extent = Mathf.Max(bounds.size.x, bounds.size.z) * 0.5f;
+            Bounds allowed = bounds;
+            allowed.Expand(bounds.size * 0.5f);
+            var candidate = new Vector3(cx, cy, zc);
+            if (!allowed.Contains(candidate) || radius < extent * 0.3f || radius > extent * 1.6f) return false;
+
+            center = candidate;
+            Debug.Log($"[Playground] {character}: сустав {joint} — радиус {radius:0.000} м, центр {candidate}");
+            return true;
+        }
+
+        /// <summary>World-space vertices in the top or bottom part of the pieces.</summary>
+        static List<Vector3> CapPoints(List<Transform> parts, Bounds bounds, bool top)
+        {
             float cut = top ? bounds.max.y - bounds.size.y * CapFraction : bounds.min.y + bounds.size.y * CapFraction;
             var points = new List<Vector3>();
             foreach (Transform part in parts)
@@ -645,139 +689,90 @@ namespace CharacterPlayground.EditorTools
                     }
                 }
             }
-            if (points.Count < 12) return false;
-
-            bool sphereOk = FitSphere(points, out Vector3 sphereCenter, out float sphereRadius, out float sphereError);
-            bool circleOk = FitCircleYZ(points, out Vector2 circleCenter, out float circleRadius, out float circleError);
-            Vector3 candidate;
-            float radius;
-            string shape;
-            if (sphereOk && (!circleOk || sphereError <= circleError))
-            {
-                candidate = sphereCenter;
-                radius = sphereRadius;
-                shape = "шар";
-            }
-            else if (circleOk)
-            {
-                candidate = new Vector3(bounds.center.x, circleCenter.x, circleCenter.y);
-                radius = circleRadius;
-                shape = "цилиндр";
-            }
-            else return false;
-
-            // Only trust a fit that lands inside the piece with a plausible radius.
-            float extent = Mathf.Max(bounds.size.x, bounds.size.z) * 0.5f;
-            Bounds allowed = bounds;
-            allowed.Expand(bounds.size * 0.5f);
-            if (!allowed.Contains(candidate) || radius < extent * 0.3f || radius > extent * 1.6f) return false;
-
-            center = candidate;
-            Debug.Log($"[Playground] {character}: сустав {joint} — {shape} радиусом {radius:0.000} м в точке {candidate}");
-            return true;
+            return points;
         }
 
-        /// <summary>Least-squares sphere through the points; error is the RMS distance from its surface over the radius.</summary>
-        static bool FitSphere(List<Vector3> points, out Vector3 center, out float radius, out float error)
+        /// <summary>Farthest distance from (a, b) to the points, in the plane of axes i and j.</summary>
+        static float Reach(List<Vector3> points, int i, int j, float a, float b)
         {
-            // |p|² = 2 c·p + k with k = r² - |c|²; linear in (c, k).
-            var normal = new double[4, 4];
-            var rhs = new double[4];
+            float farthest = 0f;
             foreach (Vector3 p in points)
             {
-                double[] row = { 2.0 * p.x, 2.0 * p.y, 2.0 * p.z, 1.0 };
-                double value = (double)p.x * p.x + (double)p.y * p.y + (double)p.z * p.z;
-                for (int i = 0; i < 4; i++)
-                {
-                    for (int j = 0; j < 4; j++) normal[i, j] += row[i] * row[j];
-                    rhs[i] += row[i] * value;
-                }
+                float da = p[i] - a, db = p[j] - b;
+                farthest = Mathf.Max(farthest, da * da + db * db);
             }
-            center = default;
-            radius = 0f;
-            error = float.MaxValue;
-            if (!Solve(normal, rhs, out double[] x)) return false;
-            double r2 = x[3] + x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
-            if (r2 <= 0.0) return false;
-            center = new Vector3((float)x[0], (float)x[1], (float)x[2]);
-            radius = (float)Math.Sqrt(r2);
-            double sum = 0.0;
-            foreach (Vector3 p in points)
-            {
-                double d = Vector3.Distance(p, center) - radius;
-                sum += d * d;
-            }
-            error = (float)(Math.Sqrt(sum / points.Count) / radius);
-            return true;
+            return Mathf.Sqrt(farthest);
         }
 
-        /// <summary>Least-squares circle through the points projected on the YZ plane (a cylinder along X).</summary>
-        static bool FitCircleYZ(List<Vector3> points, out Vector2 center, out float radius, out float error)
+        /// <summary>Ternary search for the minimum of a convex function on [low, high].</summary>
+        static float Minimise(float low, float high, Func<float, float> f)
         {
-            var normal = new double[3, 3];
-            var rhs = new double[3];
-            foreach (Vector3 p in points)
+            for (int i = 0; i < 80; i++)
             {
-                double[] row = { 2.0 * p.y, 2.0 * p.z, 1.0 };
-                double value = (double)p.y * p.y + (double)p.z * p.z;
-                for (int i = 0; i < 3; i++)
-                {
-                    for (int j = 0; j < 3; j++) normal[i, j] += row[i] * row[j];
-                    rhs[i] += row[i] * value;
-                }
+                float a = low + (high - low) / 3f, b = high - (high - low) / 3f;
+                if (f(a) < f(b)) high = b; else low = a;
             }
-            center = default;
-            radius = 0f;
-            error = float.MaxValue;
-            if (!Solve(normal, rhs, out double[] x)) return false;
-            double r2 = x[2] + x[0] * x[0] + x[1] * x[1];
-            if (r2 <= 0.0) return false;
-            center = new Vector2((float)x[0], (float)x[1]);
-            radius = (float)Math.Sqrt(r2);
-            double sum = 0.0;
-            foreach (Vector3 p in points)
-            {
-                double d = Vector2.Distance(new Vector2(p.y, p.z), center) - radius;
-                sum += d * d;
-            }
-            error = (float)(Math.Sqrt(sum / points.Count) / radius);
-            return true;
+            return (low + high) * 0.5f;
         }
 
-        /// <summary>Gaussian elimination with partial pivoting for the small normal-equation systems above.</summary>
-        static bool Solve(double[,] a, double[] b, out double[] x)
+        /// <summary>
+        /// A smooth roller hidden inside a joint: a cylinder across the body, as thick as the
+        /// piece whose end it rounds and as wide as its flat sides, so it continues the piece's
+        /// faces without a step and encloses the facets of its chamfered end. While the joint is
+        /// straight it lies a hair inside the two pieces; when the joint bends it shows a smooth
+        /// surface where the chamfer's facets would be. Only ends shaped like a roller get one: a
+        /// dome (a shoulder, the end of a tapered upper arm) is round in every direction already.
+        /// </summary>
+        static void AddRoller(string character, string joint, Transform parent, Vector3 center, float radius, List<Transform> piece,
+            float halfWidth, float halfDepth, float endHalfWidth, float otherHalfWidth, float otherHalfDepth)
         {
-            int n = b.Length;
-            x = new double[n];
-            var m = (double[,])a.Clone();
-            var v = (double[])b.Clone();
-            for (int col = 0; col < n; col++)
+            bool rollerShaped = endHalfWidth >= halfWidth * 0.8f;
+            float r = Mathf.Min(radius, halfDepth, otherHalfDepth) * 0.999f;
+            float halfLength = Mathf.Min(halfWidth, otherHalfWidth) * 0.999f;
+            bool reachesFaces = r >= halfDepth * 0.97f && halfLength >= halfWidth * 0.97f;
+            if (!rollerShaped || !reachesFaces)
             {
-                int pivot = col;
-                for (int row = col + 1; row < n; row++)
+                Debug.Log($"[Playground] {character}: сустав {joint} без ролика — конец детали {(rollerShaped ? "тоньше соседней" : "скруглён со всех сторон")}.");
+                return;
+            }
+
+            var roller = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            roller.name = joint + "Roller";
+            UnityEngine.Object.DestroyImmediate(roller.GetComponent<Collider>());
+            roller.transform.SetParent(parent, false);
+            // The primitive stands along Y; lay it along X, across the body.
+            roller.transform.SetPositionAndRotation(center, parent.root.rotation * Quaternion.Euler(0f, 0f, 90f));
+            roller.transform.localScale = new Vector3(r * 2f, halfLength, r * 2f);
+            Renderer skin = piece[0].GetComponentInChildren<Renderer>(true);
+            if (skin != null) roller.GetComponent<Renderer>().sharedMaterial = skin.sharedMaterial;
+            Debug.Log($"[Playground] {character}: ролик {joint} — радиус {r:0.000} м, ширина {halfLength * 2f:0.000} м");
+        }
+
+        /// <summary>
+        /// Half the width (X) and depth (Z) of the end of a piece, and the half width of its very
+        /// tip (the outermost 12 %): a roller-shaped end keeps its width to the tip, a dome narrows.
+        /// </summary>
+        static void CapExtents(List<Transform> parts, Bounds bounds, bool top, out float halfWidth, out float halfDepth, out float endHalfWidth)
+        {
+            List<Vector3> points = CapPoints(parts, bounds, top);
+            halfWidth = endHalfWidth = bounds.size.x * 0.5f;
+            halfDepth = bounds.size.z * 0.5f;
+            if (points.Count == 0) return;
+            float tip = top ? bounds.max.y - bounds.size.y * 0.12f : bounds.min.y + bounds.size.y * 0.12f;
+            float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
+            float tipMinX = float.MaxValue, tipMaxX = float.MinValue;
+            foreach (Vector3 p in points)
+            {
+                minX = Mathf.Min(minX, p.x); maxX = Mathf.Max(maxX, p.x);
+                minZ = Mathf.Min(minZ, p.z); maxZ = Mathf.Max(maxZ, p.z);
+                if (top ? p.y >= tip : p.y <= tip)
                 {
-                    if (Math.Abs(m[row, col]) > Math.Abs(m[pivot, col])) pivot = row;
-                }
-                if (Math.Abs(m[pivot, col]) < 1e-12) return false;
-                if (pivot != col)
-                {
-                    for (int k = 0; k < n; k++) (m[col, k], m[pivot, k]) = (m[pivot, k], m[col, k]);
-                    (v[col], v[pivot]) = (v[pivot], v[col]);
-                }
-                for (int row = col + 1; row < n; row++)
-                {
-                    double factor = m[row, col] / m[col, col];
-                    for (int k = col; k < n; k++) m[row, k] -= factor * m[col, k];
-                    v[row] -= factor * v[col];
+                    tipMinX = Mathf.Min(tipMinX, p.x); tipMaxX = Mathf.Max(tipMaxX, p.x);
                 }
             }
-            for (int row = n - 1; row >= 0; row--)
-            {
-                double sum = v[row];
-                for (int k = row + 1; k < n; k++) sum -= m[row, k] * x[k];
-                x[row] = sum / m[row, row];
-            }
-            return true;
+            halfWidth = (maxX - minX) * 0.5f;
+            halfDepth = (maxZ - minZ) * 0.5f;
+            endHalfWidth = tipMaxX > tipMinX ? (tipMaxX - tipMinX) * 0.5f : 0f;
         }
 
         static Transform Joint(string name, Transform parent, Vector3 worldPosition, List<Transform> parts)

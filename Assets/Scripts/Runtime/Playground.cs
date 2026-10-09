@@ -16,8 +16,16 @@ namespace CharacterPlayground
         const float RowGap = 0.6f;
         const float SpawnLift = 0.05f;
 
-        static readonly CharacterMotion[] Motions = { CharacterMotion.Idle, CharacterMotion.Walk, CharacterMotion.Run, CharacterMotion.Jump };
-        static readonly string[] MotionTitles = { "Покой", "Шаг", "Бег", "Прыжок" };
+        static readonly CharacterMotion[][] MotionRows =
+        {
+            new[] { CharacterMotion.Idle, CharacterMotion.Walk, CharacterMotion.Run, CharacterMotion.Jump },
+            new[] { CharacterMotion.ArmsOut, CharacterMotion.ArmsForward, CharacterMotion.Squat },
+        };
+        static readonly string[][] MotionTitleRows =
+        {
+            new[] { "Покой", "Шаг", "Бег", "Прыжок" },
+            new[] { "Руки в стороны", "Руки вперёд", "Присед" },
+        };
         static readonly float[] Speeds = { 0.25f, 0.5f, 1f };
         static readonly string[] SpeedTitles = { "0.25×", "0.5×", "1×" };
 
@@ -284,7 +292,7 @@ namespace CharacterPlayground
         {
             Entry entry = entries[currentIndex];
             bool several = entries.Count > 1;
-            var area = new Rect(10f, 10f, Mathf.Min(330f, screenWidth - 20f), 206f);
+            var area = new Rect(10f, 10f, Mathf.Min(330f, screenWidth - 20f), 244f);
             PlaygroundInput.RegisterUiRect(new Rect(area.x * scale, area.y * scale, area.width * scale, area.height * scale));
 
             GUILayout.BeginArea(area, panelStyle);
@@ -298,15 +306,19 @@ namespace CharacterPlayground
 
             GUILayout.Label($"рост {entry.height:0.00} м", smallStyle);
 
-            GUILayout.BeginHorizontal();
-            for (int i = 0; i < Motions.Length; i++)
+            for (int row = 0; row < MotionRows.Length; row++)
             {
-                GUIStyle style = entry.motion == Motions[i] ? activeButtonStyle : buttonStyle;
-                if (GUILayout.Button(MotionTitles[i], style, GUILayout.Height(34f))) SetMotion(Motions[i]);
+                GUILayout.BeginHorizontal();
+                for (int i = 0; i < MotionRows[row].Length; i++)
+                {
+                    CharacterMotion motion = MotionRows[row][i];
+                    GUIStyle style = entry.motion == motion ? activeButtonStyle : buttonStyle;
+                    if (GUILayout.Button(MotionTitleRows[row][i], style, GUILayout.Height(34f))) SetMotion(motion);
+                }
+                GUILayout.EndHorizontal();
+                GUILayout.Space(4f);
             }
-            GUILayout.EndHorizontal();
 
-            GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
             for (int i = 0; i < Speeds.Length; i++)
             {

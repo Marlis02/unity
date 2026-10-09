@@ -29,10 +29,21 @@ namespace CharacterPlayground
 
         float phase;
         float bodyBaseY;
+        float thighLength;
+        float shinLength;
+        float squat; // 0 standing, 1 fully down
 
         void Start()
         {
             if (body != null) bodyBaseY = body.localPosition.y;
+            // Leg lengths from the rest pose, to lower the body by the right amount in a squat.
+            Transform hip = leftLeg != null ? leftLeg : rightLeg;
+            Transform knee = leftShin != null ? leftShin : rightShin;
+            if (hip != null && knee != null)
+            {
+                thighLength = Mathf.Max(0f, hip.position.y - knee.position.y);
+                shinLength = Mathf.Max(0f, knee.position.y - transform.position.y);
+            }
         }
 
         void LateUpdate()
@@ -43,12 +54,13 @@ namespace CharacterPlayground
             float move = Mathf.Clamp01(speed / Mathf.Max(0.1f, character.profile.walkSpeed)); // 0 standing, 1 walking or faster
             float run = Mathf.Clamp01(character.NormalizedGait - 1f);                       // 0 at walking pace, 1 at running pace
             bool grounded = character.Grounded;
+            CharacterMotion motion = character.motion;
 
             phase += speed / Mathf.Max(0.1f, strideLength) * Mathf.PI * dt;
             float sin = Mathf.Sin(phase);
             float cos = Mathf.Cos(phase);
 
-            // Joint angles in degrees. Pitch is negative towards the front.
+            // Joint angles in degrees. Pitch is negative towards the front, spread is outwards.
             float hipSwing = move * Mathf.Lerp(28f, 42f, run);
             float kneeBend = move * Mathf.Lerp(40f, 75f, run);
             float armSwing = move * Mathf.Lerp(30f, 48f, run);
@@ -65,6 +77,7 @@ namespace CharacterPlayground
             float armSpread = 0f;
             float lean = move * Mathf.Lerp(2f, 7f, run) + breath;
             float twist = -sin * armSwing * 0.2f; // the shoulders follow the forward arm
+            float squatTarget = 0f;
 
             if (!grounded)
             {
@@ -79,6 +92,32 @@ namespace CharacterPlayground
                 lean = -4f;
                 twist = 0f;
             }
+            else if (motion == CharacterMotion.ArmsOut)
+            {
+                armSpread = 85f;
+                elbowBend = 5f;
+            }
+            else if (motion == CharacterMotion.ArmsForward)
+            {
+                leftArmPitch = rightArmPitch = -90f;
+                armSpread = 5f;
+                elbowBend = 10f;
+            }
+            else if (motion == CharacterMotion.Squat)
+            {
+                const float hip = 65f, knee = 70f;
+                leftLegPitch = rightLegPitch = -hip;
+                leftKnee = rightKnee = knee;
+                leftArmPitch = rightArmPitch = -60f;
+                armSpread = 8f;
+                elbowBend = 15f;
+                lean = 20f + breath;
+                squatTarget = 1f;
+                // Keep the feet on the floor: lower the body by what the bent legs lose in height.
+                float drop = thighLength * (1f - Mathf.Cos(hip * Mathf.Deg2Rad)) + shinLength * (1f - Mathf.Cos((hip - knee) * Mathf.Deg2Rad));
+                squat = Mathf.Lerp(squat, drop, 1f - Mathf.Exp(-14f * dt));
+            }
+            if (squatTarget == 0f) squat = Mathf.Lerp(squat, 0f, 1f - Mathf.Exp(-14f * dt));
 
             SetRotation(leftArm, leftArmPitch, 0f, -armSpread, dt);
             SetRotation(rightArm, rightArmPitch, 0f, armSpread, dt);
@@ -95,7 +134,7 @@ namespace CharacterPlayground
             {
                 float bob = grounded ? Mathf.Abs(sin) * 0.025f * move : 0f;
                 Vector3 p = body.localPosition;
-                p.y = bodyBaseY + bob;
+                p.y = bodyBaseY + bob - squat;
                 body.localPosition = p;
             }
         }

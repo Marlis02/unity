@@ -2,8 +2,8 @@ using UnityEngine;
 
 namespace CharacterPlayground
 {
-    /// <summary>What a character shows on the spot.</summary>
-    public enum CharacterMotion { Idle, Walk, Run, Jump }
+    /// <summary>What a character shows on the spot: a motion or a held pose.</summary>
+    public enum CharacterMotion { Idle, Walk, Run, Jump, ArmsOut, ArmsForward, Squat }
 
     /// <summary>
     /// A character standing on the stage and showing a motion in place: walking and running
