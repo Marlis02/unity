@@ -12,16 +12,17 @@ using UnityEngine.Timeline;
 using Object = UnityEngine.Object;
 
 // Short: "Bartender level 1000" (2026-10-10, my scenario the user picked): bacon behind a bar catches a bottle behind
-// his back without looking, the noob at the counter taps the menu's rainbow cocktail, bacon nods, cracks his knuckles,
-// flames an orange peel through a lighter (sparks), juggles bottles, pours a six-layer rainbow, sets it alight and
-// slides it down the counter; the noob blows it out and stirs it into brown sludge; bacon's eye twitches, he tosses the
-// bottle up out of frame, and it falls back into the first shot (a loop). Built in parts; this is part 1 (0-4.3 s):
-// the bar, the catch, the menu, the nod, the knuckles, the flamed peel.
+// his back without looking, the noob at the counter picks the rainbow cocktail off the menu, bacon nods, flames an
+// orange peel through a lighter (sparks), juggles bottles, pours a six-layer rainbow, sets it alight and slides it down
+// the counter; the noob blows it out and stirs it into brown sludge; bacon's eye twitches, he tosses the bottle up out
+// of frame, and it falls back into the first shot (a loop). The user (part 1, v1): slow and smooth, a relaxing watch;
+// show the noob's choice on the menu; hold the bottle and the lighter properly; make the orange obvious. Built in
+// parts; this is part 1 (0-13.6 s): the catch, the bottle put down, the menu, the nod, the peel, the flame.
 // A warm bar: a glossy wooden counter, lit shelves of bottles (our own labels), a brick wall, pendant lamps, stools.
 // Tools/Shorts/Build Bartender Short -> Assets/Scenes/Shorts_Bartender.unity + Timeline; render with ShortsRenderer.
 public static class BartenderShortBuilder
 {
-    const float Fps = 30f, Duration = 4.3f;
+    const float Fps = 30f, Duration = 13.6f;
     const string ScenePath = "Assets/Scenes/Shorts_Bartender.unity";
     const string TimelinePath = "Assets/Timelines/Shorts_Bartender.playable";
     const string ClipFolder = "Assets/Animations";
@@ -30,16 +31,26 @@ public static class BartenderShortBuilder
     const string BaconPrefab = MinifigCharacterBuilder.PrefabFolder + "/bacon_bartender.prefab";
     const string NoobPrefab = MinifigCharacterBuilder.PrefabFolder + "/noob.prefab";
 
-    // The beats (seconds): the catch behind his back; cut over the noob's shoulder, the bottle put down, the menu tapped,
-    // a nod, the knuckles; cut to his hands, the lighter flicked open, the peel squeezed through the flame; cut to his
-    // face in the glow, the lighter snapped shut
-    const float Catch = 0.55f, CutB = 1.0f, Release = 1.35f, CutC = 2.5f, Open = 2.6f, Squeeze = 3.0f, CutD = 3.4f, Close = 3.85f;
+    // The beats (seconds), slow: the bottle drifting down into his hand behind his back, shown off; past the noob's
+    // shoulder, put down, the noob reaching for the menu; close on the menu, his hand on the rainbow cocktail; bacon reads
+    // it and nods; close on the board, a peel taken from beside the cut orange; the lighter opened, the peel squeezed
+    // through the flame, the sparks in slow motion, the lighter shut
+    const float FallFrom = 0.2f, Catch = 1.6f, CutB = 3.6f, Release = 4.3f, CutC = 5.4f, Tap1 = 6.0f, Tap2 = 6.45f, CutD = 7.0f,
+        CutE = 8.4f, Pick = 9.0f, CutF = 10.0f, Open = 10.7f, Squeeze = 11.7f, Close = 13.1f;
 
     // The counter runs along X, its top at CounterH; bacon stands behind it facing -Z, the noob sits on a stool in front
     const float CounterH = 1.05f;
-    const float PropScale = 1.7f; // the lighter and the peel, cartoon-sized for his big Lego hands
     static readonly Vector3 BaconAt = new Vector3(0.05f, 0f, 0.62f), NoobAt = new Vector3(-0.5f, 0.04f, -0.78f);
-    static readonly Vector3 CardAt = new Vector3(-0.4f, CounterH, -0.16f), BottleRest = new Vector3(-0.27f, CounterH, 0.16f);
+    static readonly Vector3 CardAt = new Vector3(-0.42f, CounterH, -0.17f), BottleRest = new Vector3(-0.58f, CounterH, 0.2f);
+    // The bar station in front of him: a board with half an orange and a dish of cut peels
+    static readonly Vector3 BoardAt = new Vector3(0.04f, CounterH, 0.13f), DishAt = new Vector3(-0.07f, CounterH + 0.02f, 0.13f),
+        OrangeAt = new Vector3(0.13f, CounterH + 0.02f, 0.12f);
+    // A Lego hand's C is a tube along the hand's forward axis, 8.5 cm across and 23 cm long, its middle this far from the
+    // wrist (at rest); things are held through it, poking out of its ends
+    static readonly Vector3 GripLocal = new Vector3(0f, -0.107f, 0.03f);
+    const float TubeHalf = 0.115f;
+    const float BottleGrip = 0.24f, LighterGrip = -0.08f, PeelGrip = -0.15f; // where along each the middle of the C is
+    const float LighterScale = 2.1f;
 
     static readonly string[] Bones =
     {
@@ -270,14 +281,35 @@ public static class BartenderShortBuilder
             Solid(room, "StoolBase", Lathe(new[] { V(0f, 0.02f), V(0.2f, 0.01f), V(0.22f, 0f), V(0f, 0f) }, 28), steel, new Vector3(x, 0f, -0.78f));
             Solid(room, "StoolRing", TorusMesh(0.16f, 0.01f, 28, 8), steel, new Vector3(x, 0.3f, -0.78f));
         }
-        // The menu card on the counter in front of the noob: a little tent, the rainbow cocktail on both sides
+        // The menu on the counter in front of the noob: a tent card, the rainbow cocktail on both sides, big enough to read
         var card = Mat("MenuCard", Color.white, 0.2f, 0f, "Menu");
         var tent = new GameObject("MenuCard").transform;
         tent.SetParent(room, false);
         tent.localPosition = CardAt;
         foreach (float side in new[] { -1f, 1f })
-            Solid(tent, "Side", QuadMesh(0.11f, 0.15f), card, new Vector3(0f, 0.073f, side * 0.019f),
-                Quaternion.Euler(-side * 15f, 0f, 0f) * Quaternion.Euler(0f, side < 0f ? 180f : 0f, 0f)); // each side faces out, the tops leaning together
+            Solid(tent, "Side", QuadMesh(0.22f, 0.3f), card, new Vector3(0f, 0.146f, side * 0.036f),
+                Quaternion.Euler(-side * 14f, 0f, 0f) * Quaternion.Euler(0f, side < 0f ? 180f : 0f, 0f)); // each side faces out, the tops leaning together
+
+        // The bar station: a board, half an orange cut face up, a dish of peels (the one he takes is a prop of its own)
+        Box(room, "Board", BoardAt + new Vector3(0f, 0.01f, 0f), new Vector3(0.36f, 0.02f, 0.22f), Mat("Board", Hex("D8B48A"), 0.35f, 0f, "WoodTop", 0.6f));
+        var skin = Mat("OrangeSkin", Color.white, 0.55f, 0f, "PeelSkin");
+        var half = new GameObject("HalfOrange").transform;
+        half.SetParent(room, false);
+        half.localPosition = OrangeAt + Vector3.up * 0.058f;
+        Solid(half, "Rind", Lathe(Enumerable.Range(0, 9).Select(i => { float a = (-90f + i * 11.25f) * Mathf.Deg2Rad; return V(Mathf.Cos(a) * 0.06f, Mathf.Sin(a) * 0.06f); }).ToArray(), 32), skin, Vector3.zero);
+        var cut = Mat("OrangeCut", Color.white, 0.6f, 0f, "OrangeCut");
+        cut.SetFloat("_AlphaClip", 1f);
+        cut.SetFloat("_Cutoff", 0.5f);
+        cut.EnableKeyword("_ALPHATEST_ON");
+        Solid(half, "Cut", QuadMesh(0.122f, 0.122f), cut, new Vector3(0f, 0.0005f, 0f), Quaternion.Euler(-90f, 0f, 0f));
+        Solid(room, "Dish", Lathe(new[] { V(0f, 0f), V(0.07f, 0f), V(0.09f, 0.018f), V(0.095f, 0.024f), V(0.08f, 0.012f), V(0f, 0.008f) }, 32),
+            Mat("Porcelain", Hex("F4F1EA"), 0.8f), DishAt - Vector3.up * 0.02f);
+        var peelMat = new[] { skin, Mat("Pith", Hex("FFF6E2"), 0.3f) };
+        foreach (var (at, yaw) in new[] { (new Vector3(-0.035f, 0.002f, -0.03f), 30f), (new Vector3(0.03f, 0.004f, 0.028f), -50f) })
+        {
+            var lying = Solid(room, "Peel", PeelMesh(), skin, DishAt + at, Quaternion.Euler(0f, yaw, 0f) * Quaternion.Euler(-90f, 0f, 0f));
+            lying.GetComponent<MeshRenderer>().sharedMaterials = peelMat;
+        }
     }
 
     static Vector2 V(float r, float y) => new Vector2(r, y);
@@ -339,6 +371,8 @@ public static class BartenderShortBuilder
         Add("Key", LightType.Spot, new Vector3(0.45f, 2.45f, -1.2f), new Vector3(0.05f, 1.4f, 0.6f), new Color(1f, 0.86f, 0.7f), 6f, 6f, true, 50f);
         Add("Rim", LightType.Spot, new Vector3(-0.9f, 2.2f, 1.35f), new Vector3(0.05f, 1.45f, 0.55f), new Color(1f, 0.62f, 0.3f), 4f, 4f, false, 50f);
         Add("Fill", LightType.Point, new Vector3(0.2f, 1.4f, -1.8f), Vector3.zero, new Color(0.7f, 0.78f, 1f), 0.5f, 5f, false);
+        // The customer's light: from over the bar onto the noob's face
+        Add("Customer", LightType.Spot, new Vector3(-0.35f, 2.35f, 0.7f), new Vector3(-0.5f, 1.4f, -0.78f), new Color(1f, 0.84f, 0.66f), 5f, 4f, true, 45f);
         foreach (float y in new[] { 1.24f, 1.62f, 2.0f })
             Add("Shelf Light", LightType.Point, new Vector3(0f, y, 1.3f), Vector3.zero, new Color(1f, 0.66f, 0.32f), 1.2f, 2.2f, false);
 
@@ -442,7 +476,7 @@ public static class BartenderShortBuilder
             cameraRig.SetParent(root, false);
             camera = new GameObject("Main Camera") { tag = "MainCamera" }.AddComponent<Camera>();
             camera.transform.SetParent(cameraRig, false);
-            camera.fieldOfView = 35f;
+            camera.fieldOfView = 40f;
             camera.nearClipPlane = 0.02f;
             camera.farClipPlane = 30f;
             camera.clearFlags = CameraClearFlags.SolidColor;
@@ -452,44 +486,45 @@ public static class BartenderShortBuilder
             data.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
             data.antialiasingQuality = AntialiasingQuality.High;
             data.stopNaN = true;
-            // Each shot focused on what it shows: bacon, bacon past the noob, his hands, his face
-            float Focus(float t, Vector3 subject) => Vector3.Distance(Shot(t).at, subject);
-            shots = new[]
+            // Each shot focused on what it shows: bacon, bacon past the noob, the menu, bacon, the board, the flame
+            var subjects = new (float t, Vector3 subject, float aperture)[]
             {
-                ShotFocus(root, "Shot_A", Focus(0.5f, BaconAt + new Vector3(0f, 1.35f, -0.1f)), 2.8f),
-                ShotFocus(root, "Shot_B", Focus(1.7f, BaconAt + new Vector3(0f, 1.35f, -0.1f)), 2.0f),
-                ShotFocus(root, "Shot_C", Focus(2.9f, handsAt), 5.6f),
-                ShotFocus(root, "Shot_D", Focus(3.8f, BaconAt + new Vector3(0f, 1.5f, -0.1f)), 2.8f),
+                (1.5f, BaconAt + new Vector3(0f, 1.35f, -0.1f), 2.8f), (4.5f, BaconAt + new Vector3(0f, 1.35f, -0.1f), 2.0f),
+                (6.2f, new Vector3(-0.47f, 1.35f, -0.55f), 2.8f), (7.7f, BaconAt + new Vector3(0f, 1.5f, -0.1f), 2.8f),
+                (9.2f, DishAt, 4f), (11.5f, handsAt + Vector3.up * 0.1f, 4f),
             };
+            shots = subjects.Select((x, i) => ShotFocus(root, "Shot_" + (char)('A' + i), Vector3.Distance(Shot(x.t).at, x.subject), x.aperture)).ToArray();
 
-            // The flair bottle: a green liqueur bottle
+            // The flair bottle: a green liqueur bottle, its body as wide as his hand's C
             bottle = new GameObject("FlairBottle").transform;
             bottle.SetParent(root, false);
             var profile = new[] { V(0f, 0f), V(0.04f, 0f), V(0.043f, 0.012f), V(0.043f, 0.17f), V(0.016f, 0.22f), V(0.014f, 0.28f), V(0.018f, 0.285f), V(0.018f, 0.295f), V(0f, 0.295f) };
             Solid(bottle, "Glass", Lathe(profile, 28), Mat("FlairGlass", Hex("2E7A46").WithAlpha(0.45f), 0.96f, 0f, null, 1f, null, true), Vector3.zero, null, false);
             Solid(bottle, "Drink", Lathe(new[] { V(0f, 0.004f), V(0.038f, 0.004f), V(0.038f, 0.15f), V(0f, 0.15f) }, 20), Mat("FlairDrink", Hex("4FBF4A"), 0.7f), Vector3.zero);
-            Solid(bottle, "Label", Band(0.0445f, 0.07f, 28, 0.7f), Mat("Label0", Color.white, 0.25f, 0f, "Label0"), new Vector3(0f, 0.06f, 0f), Quaternion.Euler(0f, 180f, 0f));
+            Solid(bottle, "Label", Band(0.0445f, 0.07f, 28, 0.7f), Mat("Label0", Color.white, 0.25f, 0f, "Label0"), new Vector3(0f, 0.08f, 0f), Quaternion.Euler(0f, 180f, 0f));
             Solid(bottle, "Cap", CylinderMesh(0.021f, 0.03f, 14), Mat("CapGold", Hex("C9A04A"), 0.6f, 1f), new Vector3(0f, 0.31f, 0f));
 
-            // The lighter: a chrome case, its lid on a hinge at the back, a flame over the chimney
+            // The lighter: a chrome case, its lid on a hinge at the back, a flame over the chimney; cartoon-sized for his
+            // big hands
             var chrome = Mat("Chrome", Hex("D8DCE2"), 0.9f, 1f);
             lighter = new GameObject("Lighter").transform;
             lighter.SetParent(root, false);
-            lighter.localScale = Vector3.one * PropScale;
+            lighter.localScale = Vector3.one * LighterScale;
             Box(lighter, "Case", new Vector3(0f, 0.022f, 0f), new Vector3(0.036f, 0.044f, 0.013f), chrome);
             Box(lighter, "Chimney", new Vector3(0f, 0.05f, 0f), new Vector3(0.02f, 0.012f, 0.01f), Mat("Chimney", Hex("8C9097"), 0.5f, 1f));
             lid = new GameObject("Lid").transform;
             lid.SetParent(lighter, false);
             lid.localPosition = new Vector3(0f, 0.044f, -0.0065f);
             Box(lid, "LidCase", new Vector3(0f, 0.011f, 0.0065f), new Vector3(0.036f, 0.022f, 0.013f), chrome);
+            // The flame glows: added to what is behind it, never darker
             flame = Solid(lighter, "Flame", Lathe(new[] { V(0f, 0f), V(0.006f, 0.004f), V(0.0075f, 0.012f), V(0.005f, 0.024f), V(0.002f, 0.034f), V(0f, 0.04f) }, 16),
-                Mat("Flame", new Color(6f, 2.6f, 0.6f), 0f, 0f, null, 1f, null, false, "Universal Render Pipeline/Unlit"), new Vector3(0f, 0.056f, 0f), null, false).transform;
+                Glow("Flame", new Color(4f, 1.7f, 0.4f, 1f)), new Vector3(0f, 0.056f, 0f), null, false).transform;
             Solid(flame, "Core", Lathe(new[] { V(0f, 0f), V(0.003f, 0.003f), V(0.0035f, 0.008f), V(0f, 0.014f) }, 12),
-                Mat("FlameCore", new Color(1.2f, 2.0f, 6f), 0f, 0f, null, 1f, null, false, "Universal Render Pipeline/Unlit"), new Vector3(0f, -0.001f, 0f), null, false);
+                Glow("FlameCore", new Color(0.6f, 1.2f, 4f, 1f)), new Vector3(0f, -0.001f, 0f), null, false);
 
-            // A curl of orange peel, skin side out
-            peel = Solid(root, "OrangePeel", PeelMesh(), Mat("Peel", Hex("F28A1A"), 0.55f), Vector3.zero).transform;
-            peel.localScale = Vector3.one * PropScale;
+            // The peel he takes from the dish: orange skin out, white pith in
+            peel = Solid(root, "TakenPeel", PeelMesh(), Mat("OrangeSkin", Color.white, 0.55f, 0f, "PeelSkin"), Vector3.zero).transform;
+            peel.GetComponent<MeshRenderer>().sharedMaterials = new[] { Mat("OrangeSkin", Color.white, 0.55f, 0f, "PeelSkin"), Mat("Pith", Hex("FFF6E2"), 0.3f) };
 
             glow = new GameObject("Flame Light").AddComponent<Light>();
             glow.transform.SetParent(root, false);
@@ -501,6 +536,24 @@ public static class BartenderShortBuilder
 
             sparks = BuildSparks(root);
         }
+    }
+
+    // Light added on top of the scene (a flame, a spark): URP's unlit particle shader, additive
+    static Material Glow(string name, Color color, Texture2D texture = null)
+    {
+        var m = Mat(name, color, 0f, 0f, null, 1f, null, false, "Universal Render Pipeline/Particles/Unlit");
+        if (texture != null) m.SetTexture("_BaseMap", texture);
+        m.SetColor("_BaseColor", color);
+        m.SetFloat("_Surface", 1f);
+        m.SetFloat("_Blend", 2f);
+        m.SetOverrideTag("RenderType", "Transparent");
+        m.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+        m.SetInt("_DstBlend", (int)BlendMode.One);
+        m.SetInt("_ZWrite", 0);
+        m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        m.renderQueue = (int)RenderQueue.Transparent;
+        EditorUtility.SetDirty(m);
+        return m;
     }
 
     // The peel's flaming oils: a burst of sparks shooting out through the flame and a short orange fireball
@@ -554,6 +607,7 @@ public static class BartenderShortBuilder
         m.startSize = new ParticleSystem.MinMaxCurve(0.006f, 0.016f);
         m.startColor = new Color(1f, 0.85f, 0.5f);
         m.gravityModifier = 0.35f;
+        m.simulationSpeed = 0.4f; // slow motion
         m.maxParticles = 400;
         sparks.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 260), new ParticleSystem.Burst(0.05f, 90) });
         var shape = sparks.shape;
@@ -578,6 +632,7 @@ public static class BartenderShortBuilder
         fm.startSpeed = new ParticleSystem.MinMaxCurve(0.3f, 1.1f);
         fm.startSize = new ParticleSystem.MinMaxCurve(0.06f, 0.14f);
         fm.startColor = new Color(1f, 0.55f, 0.15f);
+        fm.simulationSpeed = 0.4f;
         fireball.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 22) });
         var fshape = fireball.shape;
         fshape.shapeType = ParticleSystemShapeType.Cone;
@@ -597,6 +652,7 @@ public static class BartenderShortBuilder
     class Pose
     {
         public readonly Dictionary<string, Vector3> e = new Dictionary<string, Vector3>();
+        public readonly Dictionary<string, Quaternion> q = new Dictionary<string, Quaternion>(); // bones set by a rotation (the hands)
         public Vector3 hips;
         public Pose Rot(string bone, Vector3 r)
         {
@@ -604,6 +660,7 @@ public static class BartenderShortBuilder
             return this;
         }
         public Pose Rot(string bone, float x, float y, float z) => Rot(bone, new Vector3(x, y, z));
+        public Pose Turn(string bone, Quaternion r) { q[bone] = r; return this; }
     }
 
     // A character in the scene: its bones (unrotated at rest) and its LiveFace
@@ -627,21 +684,20 @@ public static class BartenderShortBuilder
 
         public void Apply(Pose p)
         {
-            foreach (var b in Bones) bones[b].localRotation = Quaternion.Euler(p.e.TryGetValue(b, out var v) ? v : Vector3.zero);
+            foreach (var b in Bones) bones[b].localRotation = p.q.TryGetValue(b, out var r) ? r : Quaternion.Euler(p.e.TryGetValue(b, out var v) ? v : Vector3.zero);
             bones["Hips"].localPosition = hipsRest + p.hips;
         }
 
-        // Where a hand grips (the middle of its C) and which way something held in it points (along the C, the hand's
-        // forward at rest)
-        public Vector3 Grip(string side) => bones[side + "Hand"].TransformPoint(new Vector3(0f, -0.07f, 0.012f));
-        public Quaternion GripTurn(string side) => bones[side + "Hand"].rotation * Quaternion.Euler(90f, 0f, 0f);
+        // The middle of a hand's C, and the way its tube runs (what is held there points along it)
+        public Vector3 Grip(string side) => bones[side + "Hand"].TransformPoint(GripLocal);
+        public Vector3 Axis(string side) => bones[side + "Hand"].rotation * Vector3.forward;
         public Vector3 Forward => go.transform.forward;
     }
 
     static float Smooth(float from, float to, float t) => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(from, to, t));
     static float Bump(float from, float to, float t) => Mathf.Sin(Mathf.PI * Mathf.Clamp01(Mathf.InverseLerp(from, to, t)));
 
-    // Key angles over time, eased between keys; a key repeated a moment later holds, keys a frame apart make a cut
+    // Key values over time, eased between keys (a key repeated later holds; keys a moment apart make a cut)
     static Vector3 Keys(float t, params (float at, Vector3 value)[] keys)
     {
         if (t <= keys[0].at) return keys[0].value;
@@ -649,63 +705,80 @@ public static class BartenderShortBuilder
             if (t <= keys[i].at) return Vector3.Lerp(keys[i - 1].value, keys[i].value, Smooth(keys[i - 1].at, keys[i].at, t));
         return keys[keys.Length - 1].value;
     }
+    static Quaternion QKeys(float t, params (float at, Quaternion value)[] keys)
+    {
+        if (t <= keys[0].at) return keys[0].value;
+        for (int i = 1; i < keys.Length; i++)
+            if (t <= keys[i].at) return Quaternion.Slerp(keys[i - 1].value, keys[i].value, Smooth(keys[i - 1].at, keys[i].at, t));
+        return keys[keys.Length - 1].value;
+    }
     static (float, Vector3) K(float at, float x, float y = 0f, float z = 0f) => (at, new Vector3(x, y, z));
 
-    // Bacon. Arms: x < 0 raises an arm forward, z > 0 swings his right arm out, y < 0 turns his right forearm in (y > 0
-    // for the left); a lower arm bends forward at x < 0. Head and spine: x > 0 bends forward (looks down).
-    // Arm poses solved for where the hands must be (Solve): upper arm angles and the elbow
-    struct Arm { public Vector3 upper; public float lower; public Arm(Vector3 u, float l) { upper = u; lower = l; } }
+    // An arm: the upper arm's angles (x < 0 raises it forward), the elbow (x < 0 bends it), the hand's turn at the wrist
+    struct Arm
+    {
+        public Vector3 upper;
+        public float lower;
+        public Quaternion hand;
+        public Arm(Vector3 u, float l) { upper = u; lower = l; hand = Quaternion.identity; }
+    }
     static readonly Arm Rest = new Arm(new Vector3(-15f, 0f, 0f), -40f);
-    static Arm rCatch, rShow, rPut, rKnuckles, lKnuckles, rPeel, lLighter, nRest, nRestL, nTap;
-    static (float, Vector3) U(float at, Arm a) => (at, a.upper);
-    static (float, Vector3) L(float at, Arm a) => (at, new Vector3(a.lower, 0f, 0f));
+    static Arm rCatch, rShow, rPut, rPick, rPeel, lLighter, nRest, nRestL, nMenu;
 
+    static void ArmKeys(Pose p, string side, float t, params (float at, Arm arm)[] keys)
+    {
+        p.Rot(side + "UpperArm", Keys(t, keys.Select(k => (k.at, k.arm.upper)).ToArray()));
+        p.Rot(side + "LowerArm", Keys(t, keys.Select(k => (k.at, new Vector3(k.arm.lower, 0f, 0f))).ToArray()));
+        p.Turn(side + "Hand", QKeys(t, keys.Select(k => (k.at, k.arm.hand)).ToArray()));
+    }
+
+    // Bacon, slow and smooth: the catch, the bottle shown and put down, reading the menu and a slow nod, a peel taken
+    // from the dish, the lighter in his left hand and the peel in his right, a push of the peel at the squeeze
     static Pose BaconPose(float t)
     {
         var p = new Pose();
         const float Cut = 0.001f;
-        p.Rot("RightUpperArm", Keys(t, U(0f, Rest), U(0.15f, Rest), U(0.45f, rCatch), U(0.6f, rCatch), U(0.92f, rShow), U(1.0f, rShow), U(1.28f, rPut),
-            U(1.4f, rPut), U(1.7f, Rest), U(2.16f, Rest), U(2.3f, rKnuckles), U(CutC - Cut, rKnuckles), U(CutC, rPeel), U(CutD + 0.3f, rPeel)));
-        p.Rot("RightLowerArm", Keys(t, L(0f, Rest), L(0.15f, Rest), L(0.45f, rCatch), L(0.6f, rCatch), L(0.92f, rShow), L(1.0f, rShow), L(1.28f, rPut),
-            L(1.4f, rPut), L(1.7f, Rest), L(2.16f, Rest), L(2.3f, rKnuckles), L(CutC - Cut, rKnuckles), L(CutC, rPeel), L(CutD + 0.3f, rPeel)));
-        p.Rot("LeftUpperArm", Keys(t, U(0f, Rest), U(2.16f, Rest), U(2.3f, lKnuckles), U(CutC - Cut, lKnuckles), U(CutC, lLighter), U(CutD + 0.3f, lLighter)));
-        p.Rot("LeftLowerArm", Keys(t, L(0f, Rest), L(2.16f, Rest), L(2.3f, lKnuckles), L(CutC - Cut, lKnuckles), L(CutC, lLighter), L(CutD + 0.3f, lLighter)));
-        // Knuckles: two quick pushes; the squeeze: a little jerk of the right hand; snapping the lighter shut: a flick
-        float knuckles = 14f * (Bump(2.3f, 2.37f, t) + Bump(2.4f, 2.47f, t));
-        p.Rot("RightLowerArm", -knuckles + 6f * Bump(Squeeze - 0.03f, Squeeze + 0.08f, t), 0f, 0f);
-        p.Rot("LeftLowerArm", -knuckles + 8f * Bump(Close - 0.04f, Close + 0.08f, t), 0f, 0f);
-        p.Rot("Spine", Keys(t, K(0f, 0f), K(0.6f, 0f), K(0.92f, -4f), K(1.0f, -4f), K(1.3f, 8f), K(1.6f, 6f), K(2.16f, 6f), K(2.3f, 2f),
-            K(CutC - Cut, 2f), K(CutC, 6f), K(CutD, 6f), K(CutD + 0.25f, 0f)));
-        p.Rot("Head", Keys(t, K(0f, 0f), K(0.6f, 0f), K(0.92f, -4f, 0f, 6f), K(1.0f, -4f, 0f, 6f), K(1.3f, 10f), K(1.6f, 16f), K(2.0f, 16f),
-            K(2.25f, 4f), K(CutC - Cut, 4f), K(CutC, 14f), K(CutD, 14f), K(CutD + 0.25f, -3f, 0f, -5f)));
-        p.Rot("Head", 8f * Mathf.Sin((t - 2.0f) * 26f) * Bump(2.0f, 2.3f, t), 0f, 0f); // the nod
+        ArmKeys(p, "Right", t, (0f, Rest), (0.6f, Rest), (1.45f, rCatch), (1.75f, rCatch), (2.8f, rShow), (3.75f, rShow), (4.25f, rPut), (4.45f, rPut),
+            (5.2f, Rest), (8.55f, Rest), (Pick - 0.05f, rPick), (Pick + 0.2f, rPick), (CutF - 0.1f, rPeel), (Duration, rPeel));
+        ArmKeys(p, "Left", t, (0f, Rest), (CutF - Cut, Rest), (CutF, lLighter), (Duration, lLighter));
+        p.Rot("RightLowerArm", -5f * Bump(Squeeze - 0.15f, Squeeze + 0.25f, t), 0f, 0f);
+        p.Rot("LeftLowerArm", 6f * Bump(Close - 0.06f, Close + 0.12f, t), 0f, 0f);
+        p.Rot("Spine", Keys(t, K(0f, 0f), K(1.5f, 0f), K(2.8f, -4f), K(3.7f, -4f), K(4.25f, 8f), K(4.7f, 4f), K(8.6f, 4f), K(Pick, 12f), K(Pick + 0.3f, 12f),
+            K(CutF - 0.1f, 6f)));
+        p.Rot("Head", Keys(t, K(0f, 0f), K(1.5f, 0f), K(2.8f, -4f, 0f, 6f), K(3.7f, -4f, 0f, 6f), K(4.25f, 12f), K(4.7f, 6f), K(CutD, 6f), K(CutD + 0.4f, 16f),
+            K(8.3f, 4f), K(Pick - 0.2f, 18f), K(Pick + 0.4f, 16f), K(CutF, 12f), K(Squeeze + 0.5f, 10f), K(Squeeze + 0.9f, -3f, 0f, -5f)));
+        p.Rot("Head", 6f * Mathf.Sin((t - (CutD + 0.6f)) * 9f) * Bump(CutD + 0.6f, CutD + 1.3f, t), 0f, 0f); // a slow nod
         return p;
     }
 
-    // The noob on his stool: thighs forward, forearms on the counter; he taps the menu twice and looks up at bacon
+    // The noob on his stool, forearms on the counter; he reaches for the menu, taps the rainbow cocktail twice, sits back
     static Pose NoobPose(float t)
     {
         var p = new Pose();
         foreach (var s in new[] { "Left", "Right" }) p.Rot(s + "UpperLeg", -85f, 0f, 0f).Rot(s + "LowerLeg", 85f, 0f, 0f);
-        p.Rot("LeftUpperArm", nRestL.upper).Rot("LeftLowerArm", nRestL.lower, 0f, 0f);
-        p.Rot("RightUpperArm", Keys(t, U(0f, nRest), U(1.2f, nRest), U(1.36f, nTap), U(1.8f, nTap), U(2.0f, nRest)));
-        p.Rot("RightLowerArm", Keys(t, L(0f, nRest), L(1.2f, nRest), L(1.36f, nTap), L(1.8f, nTap), L(2.0f, nRest)));
-        p.Rot("RightUpperArm", 9f * (Bump(1.45f, 1.53f, t) + Bump(1.6f, 1.68f, t)), 0f, 0f); // tap, tap
-        p.Rot("Spine", Keys(t, K(0f, 6f), K(1.2f, 6f), K(1.36f, 10f), K(1.8f, 10f), K(2.0f, 6f)));
-        p.Rot("Head", Keys(t, K(0f, -10f), K(1.25f, -10f), K(1.4f, 12f), K(1.72f, 12f), K(1.85f, -10f)));
+        ArmKeys(p, "Left", t, (0f, nRestL));
+        ArmKeys(p, "Right", t, (0f, nRest), (4.4f, nRest), (5.5f, nMenu), (6.9f, nMenu), (7.8f, nRest));
+        p.Rot("RightUpperArm", 7f * (Bump(Tap1 - 0.1f, Tap1 + 0.15f, t) + Bump(Tap2 - 0.1f, Tap2 + 0.15f, t)), 0f, 0f); // tap, tap
+        p.Rot("Spine", Keys(t, K(0f, 6f), K(4.4f, 6f), K(5.3f, 10f), K(6.9f, 10f), K(7.8f, 6f)));
+        p.Rot("Head", Keys(t, K(0f, -10f), K(4.6f, -10f), K(5.3f, 14f), K(6.9f, 14f), K(7.6f, -10f)));
         return p;
     }
 
-    // An arm reaching a point: the upper arm's three angles and the elbow found by trying small turns of each, keeping
-    // whatever brings the hand's grip closer, with finer and finer steps (the rest of the body posed as `body`)
-    static Arm Reach(Actor actor, string side, Vector3 target, Func<Pose> body, Arm guess)
+    static void PoseArm(Actor actor, string side, Func<Pose> body, Arm arm)
+    {
+        var p = body();
+        p.Rot(side + "UpperArm", arm.upper).Rot(side + "LowerArm", arm.lower, 0f, 0f).Turn(side + "Hand", arm.hand);
+        actor.Apply(p);
+    }
+
+    // An arm reaching a point with the hand's grip (or its wrist): the upper arm's three angles and the elbow found by
+    // trying small turns of each, keeping whatever brings it closer, with finer and finer steps
+    static Arm Reach(Actor actor, string side, Vector3 target, Func<Pose> body, Arm guess, bool wrist = false)
     {
         float Error(Arm a)
         {
-            var p = body();
-            p.Rot(side + "UpperArm", a.upper).Rot(side + "LowerArm", a.lower, 0f, 0f);
-            actor.Apply(p);
-            return (actor.Grip(side) - target).magnitude;
+            PoseArm(actor, side, body, a);
+            return ((wrist ? actor.bones[side + "Hand"].position : actor.Grip(side)) - target).magnitude;
         }
         var best = guess;
         float error = Error(best);
@@ -723,38 +796,63 @@ public static class BartenderShortBuilder
                     }
                 if (!better) break;
             }
-        if (error > 0.02f) Debug.LogWarning($"[Bartender] {actor.go.name}'s {side} hand is {error:F3} m from where it should be");
+        if (!wrist && error > 0.02f) Debug.LogWarning($"[Bartender] {actor.go.name}'s {side} hand is {error:F3} m from where it should be");
         return best;
     }
 
-    // Where the hands go: behind his back for the catch, the bottle held up, put down, the knuckles, the lighter and the
-    // peel; the noob's forearms on the counter and his tap on the menu. Points are in each one's own frame (+Z forward,
-    // +X his right) unless world
+    // Holding something along `axis` with the middle of the C at `grip`: the hand turned so its tube runs along the axis
+    // (its fingers carrying on from the forearm), and the arm reaching for the wrist that puts the C there
+    static Arm Hold(Actor actor, string side, Vector3 grip, Vector3 axis, Func<Pose> body, Arm guess)
+    {
+        axis.Normalize();
+        var arm = guess;
+        for (int pass = 0; pass < 3; pass++)
+        {
+            PoseArm(actor, side, body, arm);
+            var lower = actor.bones[side + "LowerArm"];
+            var d = Vector3.ProjectOnPlane(actor.bones[side + "Hand"].position - lower.position, axis);
+            if (d.sqrMagnitude < 1e-6f) d = Vector3.ProjectOnPlane(Vector3.down, axis);
+            var turn = Quaternion.LookRotation(axis, -d.normalized);
+            arm.hand = Quaternion.identity;
+            arm = Reach(actor, side, grip - turn * GripLocal, body, arm, wrist: true);
+            PoseArm(actor, side, body, arm);
+            arm.hand = Quaternion.Inverse(lower.rotation) * turn;
+        }
+        PoseArm(actor, side, body, arm);
+        float miss = (actor.Grip(side) - grip).magnitude, twist = Vector3.Angle(actor.Axis(side), axis);
+        if (miss > 0.02f || twist > 3f) Debug.LogWarning($"[Bartender] {actor.go.name}'s {side} hand holds {miss:F3} m and {twist:F0}° off");
+        return arm;
+    }
+
+    // Where the hands go and how they hold things. Points in each one's own frame (+Z forward, +X his right) unless world
     static void Solve(Actor bacon, Actor noob)
     {
         Vector3 B(float x, float y, float z) => bacon.go.transform.TransformPoint(new Vector3(x, y, z));
+        Vector3 BDir(float x, float y, float z) => bacon.go.transform.TransformDirection(new Vector3(x, y, z)).normalized;
         Func<Pose> Lean(float spine, float head = 0f) => () => new Pose().Rot("Spine", spine, 0f, 0f).Rot("Head", head, 0f, 0f);
-        rCatch = Reach(bacon, "Right", B(0.44f, 1.0f, -0.1f), Lean(0f), new Arm(new Vector3(52f, 0f, 14f), -25f));
-        rShow = Reach(bacon, "Right", B(0.24f, 1.3f, 0.2f), Lean(-4f), new Arm(new Vector3(-40f, -15f, 10f), -88f));
-        rPut = Reach(bacon, "Right", BottleRest + Vector3.up * 0.25f, Lean(8f), new Arm(new Vector3(-50f, -6f, 6f), -38f));
-        rKnuckles = Reach(bacon, "Right", B(0.035f, 1.2f, 0.27f), Lean(2f), new Arm(new Vector3(-60f, -60f, -5f), -60f));
-        lKnuckles = Reach(bacon, "Left", B(-0.035f, 1.2f, 0.27f), Lean(2f), new Arm(new Vector3(-60f, 60f, 5f), -60f));
-        // The fists side by side at his chest: the lighter's flame rising over the left one, the peel pinched at the
-        // inner edge of the right one, next to the flame
-        lLighter = Reach(bacon, "Left", B(-0.07f, 1.12f, 0.36f), Lean(6f), new Arm(new Vector3(-30f, 50f, 5f), -80f));
-        rPeel = Reach(bacon, "Right", B(0.09f, 1.18f, 0.33f), Lean(6f), new Arm(new Vector3(-38f, -50f, -5f), -85f));
+        var up = Vector3.up;
+        // The bottle hangs from his hand by the neck: the C round its neck, upright
+        rCatch = Hold(bacon, "Right", B(0.42f, 1.05f, -0.08f), up, Lean(0f), new Arm(new Vector3(52f, 0f, 14f), -25f));
+        rShow = Hold(bacon, "Right", B(0.24f, 1.42f, 0.22f), up, Lean(-4f), new Arm(new Vector3(-40f, -15f, 10f), -88f));
+        rPut = Hold(bacon, "Right", BottleRest + up * BottleGrip, up, Lean(8f), new Arm(new Vector3(-50f, -6f, 6f), -38f));
+        // The peel lies in the dish along X; he takes it by its end, then holds it up leaning in towards the flame
+        rPick = Hold(bacon, "Right", PeelRest + Vector3.right * PeelGrip, Vector3.right, Lean(12f, 18f), new Arm(new Vector3(-55f, -30f, 0f), -40f));
+        rPeel = Hold(bacon, "Right", B(0.15f, 1.08f, 0.32f), BDir(-0.9f, 1f, 0.25f), Lean(6f), new Arm(new Vector3(-38f, -40f, -5f), -85f));
+        lLighter = Hold(bacon, "Left", B(-0.06f, 1.04f, 0.38f), up, Lean(6f), new Arm(new Vector3(-30f, 50f, 5f), -80f));
         Func<Pose> Seated(float spine) => () =>
         {
             var p = new Pose().Rot("Spine", spine, 0f, 0f);
             foreach (var s in new[] { "Left", "Right" }) p.Rot(s + "UpperLeg", -85f, 0f, 0f).Rot(s + "LowerLeg", 85f, 0f, 0f);
             return p;
         };
-        nRest = Reach(noob, "Right", new Vector3(NoobAt.x + 0.12f, CounterH + 0.04f, -0.34f), Seated(6f), new Arm(new Vector3(-52f, -10f, 0f), -38f));
-        nRestL = Reach(noob, "Left", new Vector3(NoobAt.x - 0.12f, CounterH + 0.04f, -0.34f), Seated(6f), new Arm(new Vector3(-52f, 10f, 0f), -38f));
-        nTap = Reach(noob, "Right", CardAt + new Vector3(0.02f, 0.11f, -0.07f), Seated(10f), new Arm(new Vector3(-62f, -14f, 0f), -10f));
-        bacon.Apply(BaconPose(2.9f));
-        handsAt = (bacon.Grip("Left") + bacon.Grip("Right")) / 2f;
+        nRest = Reach(noob, "Right", new Vector3(NoobAt.x + 0.12f, CounterH + 0.1f, -0.34f), Seated(6f), new Arm(new Vector3(-52f, -10f, 0f), -38f));
+        nRestL = Reach(noob, "Left", new Vector3(NoobAt.x - 0.12f, CounterH + 0.1f, -0.34f), Seated(6f), new Arm(new Vector3(-52f, 10f, 0f), -38f));
+        nMenu = Reach(noob, "Right", CardAt + new Vector3(0.02f, 0.27f, -0.14f), Seated(10f), new Arm(new Vector3(-62f, -14f, 0f), -10f));
+        bacon.Apply(BaconPose(11.5f));
+        handsAt = (bacon.Grip("Left") + bacon.Grip("Right")) / 2f + Vector3.up * 0.1f;
     }
+
+    static readonly Vector3 PeelRest = DishAt + new Vector3(0.005f, 0.008f, 0.005f); // the peel he takes, lying in the dish
 
     // Faces: each beat's face blends in over a fifth of a second, over the character's defaults
     static Dictionary<string, float> F(params (string field, float value)[] set) => set.ToDictionary(s => s.field, s => s.value);
@@ -763,14 +861,16 @@ public static class BartenderShortBuilder
     {
         // Smug: he catches it without looking
         (0f, F(("lids", 0.45f), ("smirk", 0.75f), ("smile", 0.5f), ("browAsym", 0.6f), ("browRaise", 0.1f), ("brow", 0.9f))),
+        // Putting it down
+        (CutB + 0.4f, F(("lids", 0.35f), ("smirk", 0.4f), ("smile", 0.4f), ("lookY", -0.3f), ("brow", 0.8f))),
         // Reading the menu
-        (1.3f, F(("lids", 0.3f), ("smirk", 0.3f), ("smile", 0.35f), ("lookY", -0.5f), ("brow", 0.8f))),
-        // Challenge accepted
-        (2.05f, F(("lids", 0.5f), ("browAngle", 0.35f), ("smirk", 0.85f), ("smile", 0.55f), ("brow", 1f), ("lookY", -0.1f))),
+        (CutD, F(("lids", 0.3f), ("smirk", 0.3f), ("smile", 0.35f), ("lookY", -0.5f), ("brow", 0.8f))),
+        // Good choice
+        (CutD + 0.7f, F(("lids", 0.5f), ("browAngle", 0.3f), ("smirk", 0.85f), ("smile", 0.55f), ("brow", 1f), ("lookY", -0.1f))),
         // Focused on his hands
-        (CutC, F(("lids", 0.6f), ("browAngle", 0.25f), ("smile", 0.2f), ("smirk", 0.4f), ("lookY", -0.6f), ("brow", 0.9f))),
+        (CutE, F(("lids", 0.6f), ("browAngle", 0.25f), ("smile", 0.2f), ("smirk", 0.4f), ("lookY", -0.6f), ("brow", 0.9f))),
         // Proud in the glow
-        (CutD, F(("lids", 0.42f), ("browAsym", 0.7f), ("browRaise", 0.2f), ("smirk", 0.9f), ("smile", 0.6f), ("brow", 1f))),
+        (Squeeze + 0.5f, F(("lids", 0.42f), ("browAsym", 0.7f), ("browRaise", 0.2f), ("smirk", 0.9f), ("smile", 0.6f), ("brow", 1f))),
     };
 
     static readonly (float from, Dictionary<string, float> face)[] NoobFaces =
@@ -778,8 +878,8 @@ public static class BartenderShortBuilder
         // The classic noob face: black oval eyes, a plain smile
         (0f, F(("eyeWhite", 0f), ("lids", 0f), ("brow", 0f), ("smile", 0.8f), ("smirk", 0f), ("lookY", 0.2f))),
         // Excited about the rainbow
-        (1.3f, F(("eyeWhite", 0f), ("lids", 0f), ("brow", 0f), ("smile", 1f), ("smirk", 0f), ("mouthOpen", 0.35f), ("mouthD", 0.6f), ("lookY", -0.4f))),
-        (1.85f, F(("eyeWhite", 0f), ("lids", 0f), ("brow", 0f), ("smile", 0.9f), ("smirk", 0f), ("mouthOpen", 0.15f), ("lookY", 0.3f))),
+        (CutC - 0.2f, F(("eyeWhite", 0f), ("lids", 0f), ("brow", 0f), ("smile", 1f), ("smirk", 0f), ("mouthOpen", 0.35f), ("mouthD", 0.6f), ("lookY", -0.4f))),
+        (CutD + 0.6f, F(("eyeWhite", 0f), ("lids", 0f), ("brow", 0f), ("smile", 0.9f), ("smirk", 0f), ("mouthOpen", 0.15f), ("lookY", 0.3f))),
     };
 
     static Dictionary<string, float> FaceAt(float t, Actor actor, (float from, Dictionary<string, float> face)[] beats, params float[] blinks)
@@ -787,31 +887,36 @@ public static class BartenderShortBuilder
         var face = new Dictionary<string, float>(actor.faceDefaults);
         foreach (var (from, set) in beats)
         {
-            float w = from <= 0f ? 1f : Smooth(from - 0.1f, from + 0.12f, t);
+            float w = from <= 0f ? 1f : Smooth(from - 0.15f, from + 0.2f, t);
             if (w <= 0f) continue;
             foreach (var key in face.Keys.ToList())
                 face[key] = Mathf.Lerp(face[key], set.TryGetValue(key, out var v) ? v : actor.faceDefaults[key], w);
         }
         float blink = 0f;
-        foreach (float at in blinks) { float d = t - at; blink += d < 0f || d > 0.16f ? 0f : d < 0.06f ? d / 0.06f : 1f - (d - 0.06f) / 0.1f; }
+        foreach (float at in blinks) { float d = t - at; blink += d < 0f || d > 0.2f ? 0f : d < 0.07f ? d / 0.07f : 1f - (d - 0.07f) / 0.13f; }
         face["eyeOpen"] *= 1f - Mathf.Clamp01(blink);
         return face;
     }
 
     // ---------------------------------------------------------------- the camera
 
-    static Vector3 handsAt; // where his hands are in the close-up
+    static Vector3 handsAt; // where his hands are with the lighter and the peel
 
+    // Long shots and slow moves
     static (Vector3 at, Vector3 look, float fov) Shot(float t)
     {
-        if (t < CutB) // A: wide enough for the bottle falling in from the top; a slow push in as he brings it round
-            return (Vector3.Lerp(new Vector3(0.42f, 1.45f, -2.2f), new Vector3(0.38f, 1.45f, -1.95f), Smooth(0f, CutB, t)), new Vector3(-0.08f, 1.32f, 0.55f), 42f);
-        if (t < CutC) // B: past the noob's head, on the left edge
-            return (Vector3.Lerp(new Vector3(-0.3f, 1.74f, -1.92f), new Vector3(-0.28f, 1.72f, -1.82f), Smooth(CutB, CutC, t)), new Vector3(0.02f, 1.32f, 0.5f), 38f);
-        if (t < CutD) // C: close on his hands, the lighter and the peel
-            return (handsAt + Vector3.Lerp(new Vector3(0.28f, 0.24f, -1.3f), new Vector3(0.25f, 0.22f, -1.18f), Smooth(CutC, CutD, t)), handsAt + new Vector3(0f, 0.2f, 0f), 35f);
-        // D: closer on his face in the glow, pushing in
-        return (Vector3.Lerp(new Vector3(0.2f, 1.58f, -0.8f), new Vector3(0.17f, 1.57f, -0.66f), Smooth(CutD, Duration, t)), new Vector3(0.05f, 1.5f, 0.6f), 35f);
+        if (t < CutB) // A: from his left, clear of the noob; wide enough for the bottle drifting down; a slow push in
+            return (Vector3.Lerp(new Vector3(0.8f, 1.5f, -2.25f), new Vector3(0.66f, 1.47f, -1.85f), Smooth(0f, CutB, t)), new Vector3(-0.08f, 1.32f, 0.55f), 42f);
+        if (t < CutC) // B: in front of him as he puts the bottle down
+            return (Vector3.Lerp(new Vector3(0.35f, 1.5f, -1.6f), new Vector3(0.28f, 1.46f, -1.4f), Smooth(CutB, CutC, t)), new Vector3(-0.2f, 1.25f, 0.35f), 40f);
+        if (t < CutD) // C: over his right shoulder at the noob, beaming, his hand on the menu's rainbow cocktail
+            return (Vector3.Lerp(new Vector3(-0.33f, 1.86f, 1.1f), new Vector3(-0.35f, 1.82f, 1.0f), Smooth(CutC, CutD, t)), new Vector3(-0.45f, 1.3f, -0.5f), 32f);
+        if (t < CutE) // D: bacon reads it and nods
+            return (Vector3.Lerp(new Vector3(0.28f, 1.55f, -1.2f), new Vector3(0.24f, 1.54f, -1.05f), Smooth(CutD, CutE, t)), new Vector3(0f, 1.45f, 0.55f), 36f);
+        if (t < CutF) // E: close on the board, the cut orange, a peel taken from the dish
+            return (Vector3.Lerp(new Vector3(0.25f, 1.5f, -0.48f), new Vector3(0.2f, 1.44f, -0.38f), Smooth(CutE, CutF, t)), new Vector3(0.02f, CounterH + 0.06f, 0.13f), 38f);
+        // F: the flame and the peel at his hands, his face above, slowly closer
+        return (handsAt + Vector3.Lerp(new Vector3(0.55f, 0.16f, -0.95f), new Vector3(0.46f, 0.14f, -0.8f), Smooth(CutF, Duration, t)), handsAt + new Vector3(0f, 0.12f, 0f), 36f);
     }
 
     // ---------------------------------------------------------------- baking
@@ -913,15 +1018,22 @@ public static class BartenderShortBuilder
         }
     }
 
+    // Something upright along `axis`, its front (+Z) turned as near `face` as it can
+    static Quaternion Along(Vector3 axis, Vector3 face)
+    {
+        var f = Vector3.ProjectOnPlane(face, axis);
+        if (f.sqrMagnitude < 1e-6f) f = Vector3.ProjectOnPlane(Vector3.forward, axis);
+        return Quaternion.LookRotation(f, axis);
+    }
+
     static (AnimationClip bacon, AnimationClip noob, AnimationClip stage) Bake(Set s, Actor bacon, Actor noob)
     {
         int frames = Mathf.RoundToInt(Duration * Fps);
-        // Where things will be at the beats: the catch, the close-up, the squeeze
+        // Where things are at the beats: the catch, the peel picked up
         bacon.Apply(BaconPose(Catch));
         var catchGrip = bacon.Grip("Right");
-        var catchTurn = bacon.GripTurn("Right");
-        const float NeckGrip = 0.23f; // he holds the bottle this far up, by the neck
-        Debug.Log($"[Bartender] catch grip {catchGrip:F2}, hands in the close-up {handsAt:F2}; arms: catch {rCatch.upper:F0}/{rCatch.lower:F0}, peel {rPeel.upper:F0}/{rPeel.lower:F0}, lighter {lLighter.upper:F0}/{lLighter.lower:F0}");
+        var catchAxis = bacon.Axis("Right");
+        Debug.Log($"[Bartender] catch at {catchGrip:F2}; flame and peel at {handsAt:F2}");
 
         var baconTake = new Take(bacon.go.transform);
         var noobTake = new Take(noob.go.transform);
@@ -932,13 +1044,13 @@ public static class BartenderShortBuilder
         foreach (var field in noob.faceDefaults.Keys) noobTake.Float(noob.face, field, () => noobFace[field]);
         foreach (var t in new[] { s.cameraRig, s.bottle, s.lighter, s.lid, s.flame, s.peel, s.glow.transform }) stageTake.Transform(t);
         float time = 0f;
+        var cuts = new[] { CutB, CutC, CutD, CutE, CutF };
         for (int i = 0; i < s.shots.Length; i++)
         {
             int shot = i;
-            stageTake.Active(s.shots[i], () => (time < CutB ? 0 : time < CutC ? 1 : time < CutD ? 2 : 3) == shot);
+            stageTake.Active(s.shots[i], () => cuts.Count(c => time >= c) == shot);
         }
-        stageTake.Active(s.lighter.gameObject, () => time >= CutC - 0.001f);
-        stageTake.Active(s.peel.gameObject, () => time >= CutC - 0.001f);
+        stageTake.Active(s.lighter.gameObject, () => time >= CutF - 0.001f);
         stageTake.Active(s.flame.gameObject, () => time >= Open + 0.03f && time < Close);
         stageTake.Float(s.glow, "m_Intensity", () => s.glow.intensity);
         stageTake.Float(s.camera, "field of view", () => s.camera.fieldOfView);
@@ -948,46 +1060,51 @@ public static class BartenderShortBuilder
             float t = time = f / Fps;
             bacon.Apply(BaconPose(t));
             noob.Apply(NoobPose(t));
-            baconFace = FaceAt(t, bacon, BaconFaces, 1.9f, 3.7f);
-            noobFace = FaceAt(t, noob, NoobFaces, 0.9f, 2.3f);
+            baconFace = FaceAt(t, bacon, BaconFaces, 2.3f, 5.0f, 8.1f, 10.4f, 12.9f);
+            noobFace = FaceAt(t, noob, NoobFaces, 1.2f, 4.0f, 7.3f);
 
-            // The flair bottle: falling, tumbling, into his hand behind his back; brought round, put down on the counter
+            // The bottle: drifting down slowly, tumbling once, into his hand behind his back; hanging from his hand by
+            // the neck, label out; put down on the counter
             if (t < Catch)
             {
-                float fall = Catch - t;
-                var up = catchTurn * Vector3.up;
-                s.bottle.SetPositionAndRotation(catchGrip - up * NeckGrip + Vector3.up * 4.9f * fall * fall,
-                    catchTurn * Quaternion.AngleAxis(-fall * 950f, Vector3.right));
+                float fall = Catch - Mathf.Max(t, FallFrom);
+                s.bottle.SetPositionAndRotation(catchGrip - catchAxis * BottleGrip + Vector3.up * 0.8f * fall * fall,
+                    Quaternion.AngleAxis(-fall * 260f, Vector3.right) * Along(catchAxis, Vector3.forward));
             }
+            else if (t < Release)
+            {
+                var axis = bacon.Axis("Right");
+                s.bottle.SetPositionAndRotation(bacon.Grip("Right") - axis * BottleGrip, Along(axis, Vector3.forward));
+            }
+            else s.bottle.SetPositionAndRotation(BottleRest, Along(Vector3.up, Vector3.forward));
+
+            // The lighter in his left hand by its bottom, its front to us; the lid flicked open and snapped shut; the
+            // flame flickering, flaring at the squeeze
+            var la = bacon.Axis("Left");
+            s.lighter.SetPositionAndRotation(bacon.Grip("Left") - la * LighterGrip, Along(la, bacon.Forward));
+            float open = Smooth(Open - 0.1f, Open, t) * (1f - Smooth(Close, Close + 0.08f, t));
+            s.lid.localRotation = Quaternion.Euler(-115f * open, 0f, 0f);
+            float flare = t >= Squeeze ? Mathf.Exp(-(t - Squeeze) / 0.3f) : 0f;
+            float flicker = 1f + 0.12f * Mathf.Sin(t * 31f) + 0.08f * Mathf.Sin(t * 19f + 1f);
+            s.flame.localScale = new Vector3(1f + 0.6f * flare, flicker * (1f + 1.8f * flare), 1f + 0.6f * flare) * 1.2f;
+            bool burning = t >= Open + 0.03f && t < Close;
+            var flameAt = s.flame.position + Vector3.up * 0.03f;
+            s.glow.transform.position = flameAt;
+            s.glow.intensity = burning ? 0.8f * flicker + 12f * flare : 0f;
+
+            // The peel: lying in the dish until he takes it by its end, then held up with its skin to the flame; squeezed
+            var ra = bacon.Axis("Right");
+            var peelAt = bacon.Grip("Right") - ra * PeelGrip;
+            if (t < Pick) s.peel.SetPositionAndRotation(PeelRest, Quaternion.LookRotation(Vector3.up, Vector3.right));
             else
             {
-                // Caught any old way, then held upright by the neck
-                var upright = Quaternion.Euler(0f, 160f, 0f);
-                var turn = Quaternion.Slerp(bacon.GripTurn("Right"), upright, Smooth(Catch + 0.05f, Catch + 0.3f, t));
-                var inHand = bacon.Grip("Right") - turn * Vector3.up * NeckGrip;
-                float down = Smooth(Release - 0.14f, Release, t);
-                s.bottle.SetPositionAndRotation(Vector3.Lerp(inHand, BottleRest, down), Quaternion.Slerp(turn, upright, down));
+                var skin = t < CutF ? Vector3.Slerp(Vector3.up, (bacon.Forward + Vector3.up).normalized, Smooth(Pick + 0.2f, CutF - 0.1f, t)) : flameAt - peelAt;
+                s.peel.SetPositionAndRotation(peelAt, Along(ra, skin));
             }
-
-            // The lighter in his left hand, its lid flicked open and snapped shut; the flame flickering, flaring at the squeeze
-            var lturn = bacon.GripTurn("Left");
-            s.lighter.SetPositionAndRotation(bacon.Grip("Left") + Vector3.up * 0.035f, Quaternion.LookRotation(bacon.Forward)); // upright, its top well above his fist
-            float open = Smooth(Open - 0.06f, Open, t) * (1f - Smooth(Close, Close + 0.06f, t));
-            s.lid.localRotation = Quaternion.Euler(-115f * open, 0f, 0f);
-            float flare = t >= Squeeze ? Mathf.Exp(-(t - Squeeze) / 0.12f) : 0f;
-            float flicker = 1f + 0.14f * Mathf.Sin(t * 37f) + 0.09f * Mathf.Sin(t * 23f + 1f);
-            s.flame.localScale = new Vector3(1f + 0.6f * flare, flicker * (1f + 1.8f * flare), 1f + 0.6f * flare) * 1.6f;
-            bool burning = t >= Open + 0.03f && t < Close;
-            s.glow.transform.position = s.flame.position + Vector3.up * 0.02f;
-            s.glow.intensity = burning ? 0.7f * flicker + 14f * flare : 0f;
-
-            // The peel between the fingers of his right hand, skin out towards the flame; squeezed
-            var peelAt = bacon.Grip("Right") + bacon.Forward * 0.05f + Vector3.up * 0.06f - bacon.go.transform.right * 0.05f; // pinched at the inner edge of his fist, by the flame
-            float squeeze = Bump(Squeeze - 0.04f, Squeeze + 0.12f, t);
-            s.peel.SetPositionAndRotation(peelAt, Quaternion.LookRotation(bacon.Forward, Vector3.up));
-            s.peel.localScale = new Vector3(1f - 0.3f * squeeze, 1f, 1f + 0.2f * squeeze) * PropScale;
+            float squeeze = Bump(Squeeze - 0.08f, Squeeze + 0.3f, t);
+            s.peel.localScale = new Vector3(1f - 0.3f * squeeze, 1f, 1f + 0.25f * squeeze);
             if (f == Mathf.RoundToInt(Squeeze * Fps))
-                s.sparks.transform.SetPositionAndRotation(peelAt + bacon.Forward * 0.01f, Quaternion.LookRotation(bacon.Forward + Vector3.up * 0.18f));
+                s.sparks.transform.SetPositionAndRotation(peelAt, Quaternion.LookRotation((flameAt - peelAt).normalized * 0.6f + bacon.Forward));
 
             var (camAt, camLook, fov) = Shot(t);
             s.cameraRig.SetPositionAndRotation(camAt, Quaternion.LookRotation(camLook - camAt));
@@ -1123,30 +1240,53 @@ public static class BartenderShortBuilder
         return Saved(mesh, $"Quad_{w:0.###}x{h:0.###}");
     }
 
-    // A strip of orange peel, curled, its skin facing +Z
+    // A strip of orange peel curved like the fruit, lens-shaped, 10 cm long (Y) and 5.5 cm wide: orange skin on the
+    // outside (+Z, submesh 0), white pith inside and round the edge (submesh 1)
     static Mesh PeelMesh()
     {
+        const int nx = 10, ny = 16;
+        const float W = 0.055f, Len = 0.1f, Thick = 0.007f;
         var vertices = new List<Vector3>();
-        var triangles = new List<int>();
-        const int nx = 8, ny = 5;
-        for (int j = 0; j <= ny; j++)
-            for (int i = 0; i <= nx; i++)
-            {
-                float u = i / (float)nx - 0.5f, v = j / (float)ny - 0.5f;
-                vertices.Add(new Vector3(u * 0.045f, v * 0.03f, -0.012f * (u * u * 4f) - 0.004f * v * v * 4f));
-            }
+        var uvs = new List<Vector2>();
+        var skin = new List<int>();
+        var pith = new List<int>();
+        for (int side = 0; side < 2; side++)
+            for (int j = 0; j <= ny; j++)
+                for (int i = 0; i <= nx; i++)
+                {
+                    float u = i / (float)nx - 0.5f, v = j / (float)ny - 0.5f;
+                    float x = u * W * Mathf.Sqrt(Mathf.Max(0.02f, 1f - 4f * v * v)), y = v * Len;
+                    vertices.Add(new Vector3(x, y, -x * x * 9f - y * y * 2.5f - side * Thick));
+                    uvs.Add(new Vector2(u + 0.5f, v + 0.5f));
+                }
+        int row = nx + 1, back = row * (ny + 1);
         for (int j = 0; j < ny; j++)
             for (int i = 0; i < nx; i++)
             {
-                int a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1;
-                triangles.AddRange(new[] { a, b, c, b, d, c, a, c, b, b, c, d }); // both sides
+                int a = j * row + i, b = a + 1, c = a + row, d = c + 1;
+                skin.AddRange(new[] { a, b, c, b, d, c });
+                pith.AddRange(new[] { a + back, c + back, b + back, b + back, c + back, d + back });
             }
+        // The cut edge all round, joining skin to pith
+        var loop = new List<int>();
+        for (int i = 0; i < nx; i++) loop.Add(i);
+        for (int j = 0; j < ny; j++) loop.Add(j * row + nx);
+        for (int i = nx; i > 0; i--) loop.Add(ny * row + i);
+        for (int j = ny; j > 0; j--) loop.Add(j * row);
+        for (int k = 0; k < loop.Count; k++)
+        {
+            int p = loop[k], q = loop[(k + 1) % loop.Count];
+            pith.AddRange(new[] { p, q + back, q, p, p + back, q + back });
+        }
         var mesh = new Mesh { name = "Peel" };
         mesh.SetVertices(vertices);
-        mesh.SetTriangles(triangles, 0);
+        mesh.SetUVs(0, uvs);
+        mesh.subMeshCount = 2;
+        mesh.SetTriangles(skin, 0);
+        mesh.SetTriangles(pith, 1);
         mesh.RecalculateNormals();
         mesh.RecalculateBounds();
-        return Saved(mesh, "Peel");
+        return Saved(mesh, "Peel2");
     }
 
     static Mesh Saved(Mesh mesh, string name) => RigUtility.SaveMesh(mesh, $"{Folder}/Meshes/{name}.asset");
@@ -1187,6 +1327,49 @@ public static class BartenderShortBuilder
             p.Fill(Shape.Box(new Vector2(1f, 0.33f), new Vector2(0.45f, 0.035f), 0.02f), c[2]);
             p.Fill(Shape.Box(new Vector2(1f, 0.22f), new Vector2(0.3f, 0.02f), 0.01f), c[1]);
             p.Save($"{Textures}/Label{k}.png");
+        }
+
+        // Orange skin: bright orange with little pits all over it
+        {
+            var tex = new Texture2D(256, 256, TextureFormat.RGBA32, false);
+            var random = new System.Random(6);
+            var pits = Enumerable.Range(0, 260).Select(_ => new Vector3((float)random.NextDouble() * 256f, (float)random.NextDouble() * 256f, 1.5f + (float)random.NextDouble() * 2f)).ToArray();
+            for (int y = 0; y < 256; y++)
+                for (int x = 0; x < 256; x++)
+                {
+                    float n = Mathf.PerlinNoise(x * 0.04f, y * 0.04f) * 0.12f + Mathf.PerlinNoise(x * 0.2f, y * 0.2f) * 0.06f;
+                    float pit = 0f;
+                    foreach (var pt in pits)
+                    {
+                        float dx = Mathf.Abs(x - pt.x), dy = Mathf.Abs(y - pt.y);
+                        dx = Mathf.Min(dx, 256f - dx); dy = Mathf.Min(dy, 256f - dy);
+                        float d = Mathf.Sqrt(dx * dx + dy * dy) / pt.z;
+                        if (d < 1f) pit = Mathf.Max(pit, 1f - d);
+                    }
+                    var c = Color.Lerp(Hex("F7931E"), Hex("E8700E"), n * 3f) * (1f - 0.18f * pit);
+                    c.a = 1f;
+                    tex.SetPixel(x, y, c);
+                }
+            SaveTexture(tex, "PeelSkin", TextureWrapMode.Repeat);
+        }
+        // Half an orange from above: rind, a white ring of pith, ten juicy segments
+        {
+            var p = new SpritePainter(new Rect(-0.5f, -0.5f, 1f, 1f), 256f);
+            p.Fill(Shape.Circle(Vector2.zero, 0.5f), Hex("E8780E"));
+            p.Fill(Shape.Circle(Vector2.zero, 0.455f), Hex("FFF1D2"));
+            for (int k = 0; k < 10; k++)
+            {
+                float a0 = k * 36f + 2.5f, a1 = (k + 1) * 36f - 2.5f;
+                Vector2 Dir(float a) => new Vector2(Mathf.Cos(a * Mathf.Deg2Rad), Mathf.Sin(a * Mathf.Deg2Rad));
+                var wedge = new List<Vector2> { Dir((a0 + a1) / 2f) * 0.045f };
+                for (int i = 0; i <= 6; i++) wedge.Add(Dir(Mathf.Lerp(a0, a1, i / 6f)) * 0.425f);
+                p.Fill(Shape.Polygon(wedge), Hex("FF9524"));
+                var inner = new List<Vector2> { Dir((a0 + a1) / 2f) * 0.12f };
+                for (int i = 0; i <= 6; i++) inner.Add(Dir(Mathf.Lerp(a0 + 6f, a1 - 6f, i / 6f)) * 0.36f);
+                p.Fill(Shape.Polygon(inner), Hex("FFB54A"));
+            }
+            p.Fill(Shape.Circle(Vector2.zero, 0.05f), Hex("FFF1D2"));
+            p.Save($"{Textures}/OrangeCut.png");
         }
 
         // The menu card: the rainbow cocktail in a glass, alight, three stars

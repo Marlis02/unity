@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-932779739722234545
+--- !u!114 &-1249366666767245723
 MonoBehaviour:
   m_ObjectHideFlags: 3
   m_CorrespondingSourceObject: {fileID: 0}
@@ -30,7 +30,7 @@ MonoBehaviour:
     m_Value: 0
   focusDistance:
     m_OverrideState: 1
-    m_Value: 1.2713517
+    m_Value: 1.6589605
   aperture:
     m_OverrideState: 1
     m_Value: 2.8
@@ -59,4 +59,4 @@ MonoBehaviour:
   m_Name: Bartender_Shot_D
   m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.VolumeProfile
   components:
-  - {fileID: -932779739722234545}
+  - {fileID: -1249366666767245723}
