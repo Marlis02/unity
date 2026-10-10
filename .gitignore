@@ -26,3 +26,5 @@ crashlytics-build.properties
 /Assets.zip
 # Unity licence file written by tools/unity.sh while it runs
 /.unity-license/
+# Low-quality preview renders (tools/unity.sh render ... -output out/preview/...)
+/out/preview/

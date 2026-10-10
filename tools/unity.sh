@@ -4,6 +4,7 @@
 #
 #   tools/unity.sh scene     build the phone viewer's scene, Assets/Viewer/BaconViewer.unity
 #   tools/unity.sh build     build the phone viewer for WebGL into Build/WebGL
+#   tools/unity.sh render ARGS  run the editor with a graphics device (software OpenGL), for rendering frames
 #   tools/unity.sh run ARGS  run the editor with custom arguments
 #
 # License (Unity needs one even in batch mode), from the environment:
@@ -48,6 +49,8 @@ docker_args() {
   if [[ -f /etc/ssl/certs/ca-certificates.crt ]]; then
     args+=(-v /etc/ssl/certs:/etc/ssl/certs:ro -e SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt)
   fi
+  # Rendering (tools/unity.sh render): a real graphics device, software OpenGL on the image's virtual X display
+  if [[ -n "${UNITY_RENDER:-}" ]]; then args+=(-e UNITY_RENDER=1); fi
   if [[ -f "$LICENSE_DIR/Unity_lic.ulf" ]]; then
     args+=(-v "$LICENSE_DIR:/license:ro")
   fi
@@ -138,7 +141,9 @@ if [[ $METHOD == personal ]] && ! activate_personal; then
   exit 3
 fi
 
-unity-editor -nographics -projectPath /project -logFile - "$@"
+GRAPHICS=-nographics
+[[ -n "${UNITY_RENDER:-}" ]] && GRAPHICS=""
+unity-editor $GRAPHICS -projectPath /project -logFile - "$@"
 code=$?
 
 case $METHOD in
@@ -166,6 +171,8 @@ case "$command" in
   build)
     ensure_docker; ensure_image
     run_editor -quit -buildTarget WebGL -executeMethod Viewer.EditorTools.ViewerBuild.BuildWebGLFromCommandLine "$@" ;;
+  render)
+    ensure_docker; ensure_image; UNITY_RENDER=1 run_editor "$@" ;;
   run)
     ensure_docker; ensure_image; run_editor "$@" ;;
   *)
