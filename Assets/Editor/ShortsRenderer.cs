@@ -14,8 +14,7 @@ using Object = UnityEngine.Object;
 // (no PNGs on disk). Needs a graphics device: tools/unity.sh render (software OpenGL on a virtual display).
 //   tools/unity.sh render -quit -executeMethod ShortsRenderer.RenderFromCommandLine -scene Assets/Scenes/Shorts_X.unity
 //     -output out/preview/X.mp4 [-width 540 -height 960] [-from 0 -to 11.5] [-fps 30] [-crf 20]
-//     [-build MinifigCharacterBuilder.BuildAll,XShortBuilder.Build]   run builders (no -scene: only that). Render in a
-//         fresh run after a rebuild: in the session that rebuilt them, new skinned meshes came out in the wrong pose
+//     [-build MinifigCharacterBuilder.BuildAll,XShortBuilder.Build]   run builders first (no -scene: only that)
 //     [-stills 5.3,7,10.5]   PNG stills at those times (OUTPUT_01_5.30.png ...) instead of the video, to check a change
 //     [-hide PufferJacket,Hair]   objects (by name) left out of the stills, to see what is under them
 // A preview is half size (540x960, about two thirds of a second a frame on 4 cores); the final video is 1080x1920.

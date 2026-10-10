@@ -45,6 +45,7 @@ public static class FrozenTongueShortBuilder
     // The gate post stands at the origin at the end of the fence (which runs off along -X); both tongues freeze to its
     // +X face. Bacon and the dog face -X, towards it; the street is on the -Z side, the houses on +Z
     const float PostHalf = 0.05f, PostHeight = 1.6f;
+    const float LickGap = 0.025f; // between the post and the front of his head as he licks it
     const float DogX = PostHalf + 0.035f + 0.3f; // the dog's root: its mouth (0.3 ahead of it) just off the post
     const float StartX = 5.6f, StopX = 3.6f;
 
@@ -83,9 +84,12 @@ public static class FrozenTongueShortBuilder
         var hands = rig.Hands;
         rig.Apply(BaconPose(Touch));
         var mouth = rig.Mouth;
+        float front = rig.FrontX;
         calibrating = false;
         grabX = DogX + 0.09f - hands.x;
-        lickX = PostHalf + 0.012f - mouth.x;
+        // He stands where the front of his head (the forehead and the fringe, which lead as he leans in, not the mouth)
+        // stays LickGap off the post; only the tongue reaches it (the user, v2: "his head goes into the metal")
+        lickX = PostHalf + LickGap - front;
         contact = new Vector3(PostHalf + 0.004f, mouth.y, 0f);
         Path();
 
@@ -786,6 +790,7 @@ public static class FrozenTongueShortBuilder
         public readonly GameObject go;
         public readonly Transform[] bones;
         readonly Vector3 hipsRest, mouthLocal;
+        readonly List<Vector3> headPoints = new List<Vector3>(); // the head and hair, in the head bone's space
         readonly float footRest;
         readonly Transform head, leftHand, rightHand, leftFoot, rightFoot;
 
@@ -801,6 +806,11 @@ public static class FrozenTongueShortBuilder
             // The mouth: a little below the middle of the face, on the front of the head
             var headBounds = go.GetComponentsInChildren<SkinnedMeshRenderer>().First(r => r.name == "HeadMesh").bounds;
             mouthLocal = head.InverseTransformPoint(new Vector3(0f, headBounds.center.y - 0.075f, headBounds.max.z - 0.005f));
+            // Both ride the head bone rigidly; the rig is still in its rest pose here, so mesh space maps straight through
+            var headMesh = go.GetComponentsInChildren<SkinnedMeshRenderer>().First(r => r.name == "HeadMesh");
+            foreach (var v in headMesh.sharedMesh.vertices) headPoints.Add(head.InverseTransformPoint(headMesh.transform.TransformPoint(v)));
+            var hair = go.GetComponentsInChildren<MeshFilter>(true).FirstOrDefault(m => m.name == "Hair");
+            if (hair != null) foreach (var v in hair.sharedMesh.vertices) headPoints.Add(head.InverseTransformPoint(hair.transform.TransformPoint(v)));
             go.transform.rotation = Quaternion.Euler(0f, -90f, 0f);
         }
 
@@ -815,6 +825,8 @@ public static class FrozenTongueShortBuilder
 
         public Vector3 HipsLocal => bones[0].localPosition;
         public Vector3 Mouth => head.TransformPoint(mouthLocal);
+        // How far forward (towards -X, where he faces) his head or hair reaches, as posed
+        public float FrontX => headPoints.Min(p => head.TransformPoint(p).x);
         public Vector3 Hands => (leftHand.position + rightHand.position) / 2f;
     }
 
@@ -924,8 +936,9 @@ public static class FrozenTongueShortBuilder
         }
         float yaw = HeadYaw(t);
         p.Rot("Spine", 45f * squat - 10f * haul + 5f * haul * Mathf.Sin(t * 20f) - 18f * fall + 4f * sneak + 22f * lean - 8f * stuck - 5f * tug, 0.3f * yaw, 0f);
-        // The idea: chin up a little and the head cocked, as the grin spreads
-        p.Rot("Head", 12f * see - 25f * squat + 8f * lean - 4f * stuck - 6f * idea, yaw, 8f * see - 9f * idea);
+        // The idea: chin up a little and the head cocked, as the grin spreads. Licking: leaning in with the chin up, so
+        // the mouth leads, not the forehead and the fringe
+        p.Rot("Head", 12f * see - 25f * squat - 14f * lean - 4f * stuck - 6f * idea, yaw, 8f * see - 9f * idea);
         return p;
     }
 
