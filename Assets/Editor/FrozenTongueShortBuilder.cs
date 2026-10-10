@@ -15,16 +15,17 @@ using Object = UnityEngine.Object;
 
 // Short: the Roblox half of the user's "dog got its tongue stuck" clip (Brookhaven frames, 2026-10-10). Bacon, in his
 // winter jacket, walks down a snowy street and stops: a little white dog has its tongue frozen to a metal gate post. He
-// squats, grabs it and hauls it back, the tongue stretches and pops free, the dog runs off. He looks round to make sure
-// nobody is watching (the user), licks the post himself and is stuck, tugging, his tongue stretched to the post, "o_o".
+// squats, grabs it and hauls it back, the tongue stretches and pops free, the dog runs off. An idea dawns on his face,
+// a sly grin; he looks slowly round to make sure nobody is watching (the user), licks the post himself and is stuck,
+// tugging, his tongue stretched to the post, "o_o".
 // The user wants it to look expensive, not slapdash: textured snow, pavement and brick (Textures/, made by a script),
 // detailed houses with lit windows, fairy lights and icicles, snowy pines, a wrought-iron fence, falling snow, a sky,
-// a low winter sun and graded post. ~11.5 s.
+// a low winter sun and graded post. ~13 s.
 // Tools/Shorts/Build Frozen Tongue Short -> Assets/Scenes/Shorts_FrozenTongue.unity + Timeline; Build(record: true) adds a
 // Recorder track: Play writes PNG frames and ShortsFrameEncoder makes Recordings/Shorts_FrozenTongue_<take>.mp4.
 public static class FrozenTongueShortBuilder
 {
-    const float Fps = 30f, Duration = 11.5f;
+    const float Fps = 30f, Duration = 13f;
     const string ScenePath = "Assets/Scenes/Shorts_FrozenTongue.unity";
     const string TimelinePath = "Assets/Timelines/Shorts_FrozenTongue.playable";
     const string ClipFolder = "Assets/Animations";
@@ -34,10 +35,12 @@ public static class FrozenTongueShortBuilder
     const int VideoWidth = 1080, VideoHeight = 1920;
     const string RecordingFolder = "Recordings/Shorts_FrozenTongue_<Take>" + ShortsFrameEncoder.FramesSuffix; // relative to the project folder
 
-    // The beats (seconds): walking up, "o?", the dog stuck (wide), squat and grab, haul, pop, a look round (nobody
-    // about?), up to the post, the lick, stuck and tugging
-    const float Stop = 1.2f, DogShot = 1.9f, Grab = 3.2f, Haul = 3.55f, Pop = 4.25f, LookRound = 5.0f, Approach = 6.65f,
-        Lick = 7.35f, Touch = 7.65f, Stuck = 7.8f;
+    // The beats (seconds): walking up, "o?", the dog stuck (wide), squat and grab, haul, pop, an idea (a sly grin), a
+    // slow look round (nobody about?), up to the post, the lick, stuck and tugging. The user (preview v1): the look round
+    // was too quick; after the dog runs off an idea should show on his face with a grin, then he looks round slowly,
+    // and only then tries it.
+    const float Stop = 1.2f, DogShot = 1.9f, Grab = 3.2f, Haul = 3.55f, Pop = 4.25f, Idea = 5.0f, LookRound = 6.0f, Approach = 8.75f,
+        Lick = 9.45f, Touch = 9.75f, Stuck = 9.9f;
 
     // The gate post stands at the origin at the end of the fence (which runs off along -X); both tongues freeze to its
     // +X face. Bacon and the dog face -X, towards it; the street is on the -Z side, the houses on +Z
@@ -831,8 +834,8 @@ public static class FrozenTongueShortBuilder
         path.Add((Pop, Pop + 0.3f, grabX + 0.55f));
         path.Add((Approach, Lick, lickX));
         path.Add((Stuck + 0.15f, Stuck + 0.5f, lickX + 0.1f));
-        path.Add((8.75f, 9f, lickX + 0.18f));
-        path.Add((9.75f, 10f, lickX + 0.26f));
+        path.Add((Stuck + 0.95f, Stuck + 1.2f, lickX + 0.18f));
+        path.Add((Stuck + 1.95f, Stuck + 2.2f, lickX + 0.26f));
     }
 
     static float Ease(float t0, float u) => t0 <= 0f ? 1f - (1f - u) * (1f - u) : Mathf.SmoothStep(0f, 1f, u);
@@ -865,9 +868,10 @@ public static class FrozenTongueShortBuilder
 
     static float Smooth(float from, float to, float t) => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(from, to, t));
 
-    // The look round: his head to his right, then all the way to his left, then back; the eyes get there first
-    static float HeadYaw(float t) => 55f * Smooth(LookRound + 0.2f, LookRound + 0.45f, t) - 110f * Smooth(LookRound + 0.75f, LookRound + 1.05f, t)
-        + 55f * Smooth(LookRound + 1.3f, LookRound + 1.5f, t);
+    // The look round, slowly: his head to his right, a pause, all the way to his left, a pause, then back; the eyes get
+    // there first
+    static float HeadYaw(float t) => 55f * Smooth(LookRound + 0.2f, LookRound + 0.75f, t) - 110f * Smooth(LookRound + 1.05f, LookRound + 1.85f, t)
+        + 55f * Smooth(LookRound + 2.15f, LookRound + 2.55f, t);
 
     const float Legs = 0.626f; // thigh + shin
 
@@ -879,6 +883,7 @@ public static class FrozenTongueShortBuilder
         float haul = Smooth(Haul, Haul + 0.25f, t) * (1f - Smooth(Pop, Pop + 0.1f, t));
         float fall = Smooth(Pop, Pop + 0.12f, t) * (1f - Smooth(Pop + 0.45f, Pop + 0.85f, t));
         float see = Smooth(Stop, Stop + 0.25f, t) * (1f - Smooth(DogShot + 0.1f, DogShot + 0.4f, t));
+        float idea = Smooth(Idea, Idea + 0.3f, t) * (1f - Smooth(LookRound - 0.1f, LookRound + 0.25f, t));
         float sneak = Smooth(LookRound, LookRound + 0.3f, t) * (1f - Smooth(Approach - 0.1f, Approach + 0.2f, t));
         float lean = Smooth(Lick, Touch, t);
         float stuck = Smooth(Stuck + 0.1f, Stuck + 0.4f, t);
@@ -919,7 +924,8 @@ public static class FrozenTongueShortBuilder
         }
         float yaw = HeadYaw(t);
         p.Rot("Spine", 45f * squat - 10f * haul + 5f * haul * Mathf.Sin(t * 20f) - 18f * fall + 4f * sneak + 22f * lean - 8f * stuck - 5f * tug, 0.3f * yaw, 0f);
-        p.Rot("Head", 12f * see - 25f * squat + 8f * lean - 4f * stuck, yaw, 8f * see);
+        // The idea: chin up a little and the head cocked, as the grin spreads
+        p.Rot("Head", 12f * see - 25f * squat + 8f * lean - 4f * stuck - 6f * idea, yaw, 8f * see - 9f * idea);
         return p;
     }
 
@@ -933,11 +939,16 @@ public static class FrozenTongueShortBuilder
             ("gritted", 1f), ("mouthOpen", 0.45f), ("mouthWidth", 1.3f), ("smile", -0.2f), ("smirk", 0f), ("creases", 0.8f), ("bold", 1f))),
         (Pop, Face(("eyeRound", 1f), ("pupilSmall", 0.5f), ("lids", 0f), ("brow", 1f), ("browArc", 1f), ("browRaise", 0.8f),
             ("mouthOpen", 0.6f), ("mouthD", 0.8f), ("mouthWidth", 0.7f), ("smile", 0.2f), ("smirk", 0f))),
+        // The idea: "oh!", eyes wide and bright, brows up; then a slow sly grin, one brow up, the eyes narrowing
+        (Idea, Face(("eyeRound", 1f), ("pupilSmall", 0.2f), ("lids", 0f), ("brow", 1f), ("browArc", 1f), ("browRaise", 0.9f),
+            ("mouthOpen", 0.2f), ("mouthD", 0.4f), ("mouthWidth", 0.6f), ("smile", 0.2f), ("smirk", 0f), ("lookY", -0.15f))),
+        (Idea + 0.55f, Face(("lids", 0.4f), ("lidTilt", 0.3f), ("brow", 1f), ("browAsym", 0.8f), ("browRaise", 0.2f),
+            ("smirk", 0.85f), ("smile", 0.6f), ("mouthOpen", 0.05f))),
         // Nobody about? Narrowed, shifty eyes, a tight mouth
         (LookRound + 0.1f, Face(("lids", 0.5f), ("lidTilt", 0.25f), ("brow", 1f), ("browAngle", 0.35f), ("browRaise", -0.1f),
             ("smile", 0f), ("smirk", 0.15f), ("mouthOpen", 0f), ("mouthWidth", 0.75f))),
         // ...nobody: a sly grin
-        (LookRound + 1.45f, Face(("lids", 0.4f), ("lidTilt", 0.3f), ("brow", 1f), ("browAsym", 0.8f), ("browRaise", 0.2f),
+        (LookRound + 2.5f, Face(("lids", 0.4f), ("lidTilt", 0.3f), ("brow", 1f), ("browAsym", 0.8f), ("browRaise", 0.2f),
             ("smirk", 0.85f), ("smile", 0.6f), ("mouthOpen", 0.05f))),
         (Lick, Face(("lids", 0.45f), ("eyeHappy", 0.3f), ("tongueOut", 1f), ("mouthOpen", 0.35f), ("smile", 0.3f), ("smirk", 0.2f))),
         (Stuck, Face(("eyeRound", 1f), ("pupilSmall", 0.85f), ("lids", 0f), ("brow", 1f), ("browArc", 1f), ("browAngle", -0.6f), ("browRaise", 0.6f),
@@ -964,8 +975,8 @@ public static class FrozenTongueShortBuilder
         // "o?": a couple of words at the dog
         if (t > Stop + 0.15f && t < DogShot) face["mouthOpen"] += 0.25f * Mathf.Abs(Mathf.Sin((t - Stop) * 13f));
         // The look round: the eyes go first, the way the head is about to turn (his right is -X on the face)
-        if (t > LookRound && t < Approach) face["lookX"] = Mathf.Clamp(-HeadYaw(t + 0.12f) / 55f * 0.9f, -1f, 1f);
-        float blink = BlinkAt(t, 0.7f) + BlinkAt(t, LookRound + 1.6f);
+        if (t > LookRound && t < Approach) face["lookX"] = Mathf.Clamp(-HeadYaw(t + 0.2f) / 55f * 0.9f, -1f, 1f);
+        float blink = BlinkAt(t, 0.7f) + BlinkAt(t, Idea + 0.3f) + BlinkAt(t, LookRound + 0.85f) + BlinkAt(t, LookRound + 2.7f);
         face["eyeOpen"] *= 1f - Mathf.Clamp01(blink);
         return face;
     }
@@ -1074,7 +1085,7 @@ public static class FrozenTongueShortBuilder
                 at.x += 3f * dash * dash + 1.2f * dash;
                 run = t > Pop + 0.3f ? 1f : 0f;
                 at.y += run * 0.03f * Mathf.Abs(Mathf.Sin(t * 22f));
-                if (t > LookRound) at = new Vector3(12f, 0f, 0f);
+                if (t > Idea) at = new Vector3(12f, 0f, 0f);
             }
             dog.root.localPosition = at;
             dog.root.localRotation = Quaternion.Euler(0f, yaw, 0f);
@@ -1098,7 +1109,7 @@ public static class FrozenTongueShortBuilder
             {
                 float back = Mathf.Clamp01((t - Pop) / 0.08f);
                 var tip = Vector3.Lerp(dogContact, mouth + dog.mouth.forward * 0.025f + Vector3.down * 0.01f, back);
-                if (t > LookRound) tip = mouth;
+                if (t > Idea) tip = mouth;
                 Strip(dogTongue, mouth, tip, 0.03f, 0.008f);
             }
 
@@ -1160,15 +1171,15 @@ public static class FrozenTongueShortBuilder
     {
         if (t < DogShot) // up the street towards us; he stops and says something at what he sees
             return (Vector3.Lerp(new Vector3(1.3f, 1.42f, -0.32f), new Vector3(1.6f, 1.42f, -0.3f), t / DogShot), new Vector3(StopX + 0.3f, 1.3f, 0f));
-        if (t < LookRound) // wide, side on: the dog stuck to the post; bacon comes in, hauls, the tongue pops
+        if (t < Idea) // wide, side on: the dog stuck to the post; bacon comes in, hauls, the tongue pops
         {
-            float k = Smooth(DogShot, LookRound, t);
+            float k = Smooth(DogShot, Idea, t);
             return (new Vector3(Mathf.Lerp(0.6f, 0.75f, k), 0.95f, -3.7f), new Vector3(Mathf.Lerp(0.6f, 0.75f, k), 0.8f, 0f));
         }
-        if (t < Approach) // from in front: he looks round, nobody about
+        if (t < Approach) // from in front, pushing in slowly: the idea on his face, then he looks round, nobody about
         {
             float bx = grabX + 0.55f;
-            return (Vector3.Lerp(new Vector3(bx - 1.95f, 1.45f, -1.1f), new Vector3(bx - 1.75f, 1.45f, -1f), Smooth(LookRound, Approach, t)), new Vector3(bx, 1.3f, 0f));
+            return (Vector3.Lerp(new Vector3(bx - 1.95f, 1.45f, -1.1f), new Vector3(bx - 1.6f, 1.45f, -0.92f), Smooth(Idea, Approach, t)), new Vector3(bx, 1.3f, 0f));
         }
         if (t < Stuck) // three-quarters from in front: up to the post and the lick
             return (Vector3.Lerp(new Vector3(-1.3f, 1.45f, -1.35f), new Vector3(-1.15f, 1.42f, -1.2f), Smooth(Approach, Stuck, t)), new Vector3(lickX - 0.05f, 1.2f, 0f));

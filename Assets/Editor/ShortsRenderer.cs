@@ -14,7 +14,11 @@ using Object = UnityEngine.Object;
 // (no PNGs on disk). Needs a graphics device: tools/unity.sh render (software OpenGL on a virtual display).
 //   tools/unity.sh render -quit -executeMethod ShortsRenderer.RenderFromCommandLine -scene Assets/Scenes/Shorts_X.unity
 //     -output out/preview/X.mp4 [-width 540 -height 960] [-from 0 -to 11.5] [-fps 30] [-crf 20]
-// A preview is half size (540x960, about half a second a frame on 4 cores); the final video is 1080x1920.
+//     [-build MinifigCharacterBuilder.BuildAll,XShortBuilder.Build]   run builders (no -scene: only that). Render in a
+//         fresh run after a rebuild: in the session that rebuilt them, new skinned meshes came out in the wrong pose
+//     [-stills 5.3,7,10.5]   PNG stills at those times (OUTPUT_01_5.30.png ...) instead of the video, to check a change
+//     [-hide PufferJacket,Hair]   objects (by name) left out of the stills, to see what is under them
+// A preview is half size (540x960, about two thirds of a second a frame on 4 cores); the final video is 1080x1920.
 public static class ShortsRenderer
 {
     public static void RenderFromCommandLine()
@@ -22,7 +26,15 @@ public static class ShortsRenderer
         int code = 0;
         try
         {
-            Render(Argument("-scene") ?? throw new ArgumentException("-scene missing"),
+            foreach (var method in (Argument("-build") ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)) Invoke(method.Trim());
+            if (Argument("-scene") == null && Argument("-build") != null) { }
+            else if (Argument("-stills") is string stills)
+            {
+                Stills(Argument("-scene") ?? throw new ArgumentException("-scene missing"), Argument("-output") ?? throw new ArgumentException("-output missing"),
+                    int.Parse(Argument("-width") ?? "540"), int.Parse(Argument("-height") ?? "960"),
+                    Array.ConvertAll(stills.Split(','), x => double.Parse(x, System.Globalization.CultureInfo.InvariantCulture)));
+            }
+            else Render(Argument("-scene") ?? throw new ArgumentException("-scene missing"),
                 Argument("-output") ?? throw new ArgumentException("-output missing"),
                 int.Parse(Argument("-width") ?? "540"), int.Parse(Argument("-height") ?? "960"),
                 float.Parse(Argument("-from") ?? "0", System.Globalization.CultureInfo.InvariantCulture),
@@ -88,10 +100,58 @@ public static class ShortsRenderer
                   $"({clock.Elapsed.TotalSeconds / Math.Max(1, last - first):0.00} s a frame)");
     }
 
+    // A static method with no parameters, by "Type.Method" (a builder's menu command)
+    static void Invoke(string name)
+    {
+        int dot = name.LastIndexOf('.');
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var type = assembly.GetType(name.Substring(0, dot));
+            var method = type?.GetMethod(name.Substring(dot + 1), System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Static, null, Type.EmptyTypes, null);
+            if (method == null) continue;
+            Debug.Log("[ShortsRenderer] " + name);
+            method.Invoke(null, null);
+            return;
+        }
+        throw new ArgumentException("No static method " + name + "()");
+    }
+
+    public static void Stills(string scenePath, string output, int width, int height, double[] times)
+    {
+        EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        QualitySettings.SetQualityLevel(QualitySettings.names.Length - 1, true);
+        var director = Object.FindFirstObjectByType<PlayableDirector>() ?? throw new InvalidOperationException("No PlayableDirector in " + scenePath);
+        var camera = Camera.main ?? throw new InvalidOperationException("No MainCamera in " + scenePath);
+        var hide = (Argument("-hide") ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var t in Object.FindObjectsByType<Transform>(FindObjectsSortMode.None))
+            if (Array.IndexOf(hide, t.name) >= 0) t.gameObject.SetActive(false);
+        var rt = new RenderTexture(width, height, 24, GraphicsFormat.R8G8B8A8_SRGB);
+        var tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+        camera.targetTexture = rt;
+        DynamicGI.UpdateEnvironment();
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output)));
+        Frame(director, camera, times[0], tex); // warm-up
+        for (int i = 0; i < times.Length; i++)
+        {
+            double time = times[i];
+            Frame(director, camera, time, tex);
+            string file = $"{output}_{i + 1:00}_{time.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}.png";
+            File.WriteAllBytes(file, tex.EncodeToPNG());
+            Debug.Log("[ShortsRenderer] " + file);
+        }
+        camera.targetTexture = null;
+        Object.DestroyImmediate(rt);
+        Object.DestroyImmediate(tex);
+    }
+
+    // Every frame here is rendered within one editor frame, where a skinned mesh can keep the matrices it was skinned
+    // with (the puffer jacket showed an earlier pose, hiding the logo): they are recalculated at every render
     static void Frame(PlayableDirector director, Camera camera, double time, Texture2D tex)
     {
         director.time = time;
         director.Evaluate();
+        foreach (var skin in Object.FindObjectsByType<SkinnedMeshRenderer>(FindObjectsSortMode.None)) skin.forceMatrixRecalculationPerRender = true;
         foreach (var face in Object.FindObjectsByType<LiveFace>(FindObjectsSortMode.None)) face.Apply();
         camera.Render();
         var previous = RenderTexture.active;

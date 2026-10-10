@@ -130,6 +130,7 @@ public static class MinifigCharacterBuilder
         public Color? sleeves, forearms, shins; // default to shirt, skin and pants
         public Color? wrists;                   // the wrist rings (fur cuffs on a jacket), default skin
         public Color? collar;                   // a fluffy fur collar round the neck (a winter jacket), or none
+        public bool puffer;                     // a quilted puffer jacket (the shirt's colour) over the shirt and sleeves
         public bool logo;
         public string logoTexture;              // the chest logo, null for the play logo (LogoPath)
         public string hair;                     // a Tripo hair style (Tripo_Hair_<hair>), or null for none
@@ -170,18 +171,20 @@ public static class MinifigCharacterBuilder
             forearms = Hex("8D5A3B"), hair = Dreads, hairColor = Hex("17120F"), face = RobloxFace.Emotion.Smile, liveFace = true, bumps = true,
             shirtPattern = "Monogram", // our own rings-and-diamonds monogram in the spirit of the clip's designer shirt (no brand logo)
         },
-        // Bacon for winter (the frozen tongue short, the user: "put bacon in a jacket"): a brown jacket over his clothes,
-        // long sleeves, a cream fur collar and fur cuffs, like the jacket in the clip; the logo on the jacket
+        // Bacon for winter (the frozen tongue short, the user: "put bacon in a jacket"): a brown puffer jacket over his
+        // clothes (the user, 2026-10-10: "make it a puffer; now it's just a ring round his neck"), quilted, long sleeves,
+        // a puffed stand-up collar, dark knit cuffs; the logo on the jacket
         new Spec
         {
             name = "bacon_winter", skin = Hex("EDEDED"), shirt = Hex("5A3B2A"), pants = Hex("25272E"), shoes = Hex("F2F2F2"),
-            forearms = Hex("5A3B2A"), wrists = Hex("E6D8BE"), collar = Hex("E6D8BE"),
+            forearms = Hex("5A3B2A"), wrists = Hex("3A281D"), puffer = true,
             logo = true, hair = RobloxBacon, hairColor = Hex("1F4FD6"), face = RobloxFace.Emotion.Smile, liveFace = true,
         },
     };
 
     static readonly Dictionary<string, Material> materials = new Dictionary<string, Material>();
-    static Mesh bumpsMesh, collarMesh;
+    static Mesh bumpsMesh, collarMesh, pufferBody, pufferLogo, pufferCollar;
+    static readonly Dictionary<string, Mesh> pufferSleeves = new Dictionary<string, Mesh>();
     const string Dreads = "Dreads";
 
     [MenuItem("Tools/Characters/Build Characters")]
@@ -216,6 +219,15 @@ public static class MinifigCharacterBuilder
                     : RigUtility.StretchTripoHair(spec.hair, body[0].bounds, HairInflate), "Minifig_Hair_" + spec.hair);
         bumpsMesh = SaveMesh(Bumps(body[0]), "Minifig_Bumps");
         collarMesh = SaveMesh(FurCollar(body[0].bounds), "Minifig_FurCollar");
+        if (Specs.Any(sp => sp.puffer))
+        {
+            pufferBody = SaveMesh(JacketMesh(body[TorsoPart]), "Minifig_PufferBody");
+            pufferLogo = SaveMesh(RigUtility.FaceGrid(FrontTriangles(pufferBody), LogoCenterY, LogoSize, DecalLift, LogoCenterX), "Minifig_PufferLogo");
+            pufferCollar = SaveMesh(PufferCollar(body[0].bounds), "Minifig_PufferCollar");
+            pufferSleeves.Clear();
+            foreach (var side in new[] { "Left", "Right" })
+                pufferSleeves[side] = SaveMesh(SleeveMesh(limbs[side + "ArmMesh"].mesh, side), $"Minifig_Puffer{side}Sleeve");
+        }
 
         // Build in a preview scene so the open scene isn't touched
         var stage = EditorSceneManager.NewPreviewScene();
@@ -290,9 +302,34 @@ public static class MinifigCharacterBuilder
         face.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
         if (s.liveFace) face.AddComponent<LiveFace>();
         else face.AddComponent<RobloxFace>().emotion = (int)s.face;
+        if (s.puffer)
+        {
+            var nylon = PufferMaterial(s.shirt);
+            var jacket = new GameObject("PufferJacket");
+            jacket.transform.SetParent(root.transform, false);
+            jacket.transform.localScale = Vector3.one * Height;
+            var jacketSkin = jacket.AddComponent<SkinnedMeshRenderer>();
+            jacketSkin.sharedMesh = pufferBody;
+            jacketSkin.bones = new[] { bones["Hips"], bones["Spine"] };
+            jacketSkin.rootBone = bones["Hips"];
+            jacketSkin.sharedMaterial = nylon;
+            foreach (var side in new[] { "Left", "Right" })
+            {
+                var sleeve = new GameObject(side + "PufferSleeve");
+                sleeve.transform.SetParent(root.transform, false);
+                sleeve.transform.localScale = Vector3.one * Height;
+                var sleeveSkin = sleeve.AddComponent<SkinnedMeshRenderer>();
+                sleeveSkin.sharedMesh = pufferSleeves[side];
+                var limbBones = limbs[side + "ArmMesh"].bones;
+                sleeveSkin.bones = System.Array.ConvertAll(limbBones, b => bones[b]);
+                sleeveSkin.rootBone = bones[limbBones[0]];
+                sleeveSkin.sharedMaterial = nylon;
+            }
+            Part(bones["Spine"], "PufferCollar", pufferCollar, nylon);
+        }
         if (s.logo)
         {
-            var logo = Part(bones["Spine"], "Logo", logoMesh, LogoMaterial(s.logoTexture ?? LogoPath));
+            var logo = Part(bones["Spine"], "Logo", s.puffer ? pufferLogo : logoMesh, LogoMaterial(s.logoTexture ?? LogoPath));
             logo.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
         }
         if (s.hair != null) Part(bones["Head"], "Hair", hairMeshes[s.hair], HairMaterial(s.hairColor, s.hair == Dreads ? 0.2f : HairSmoothness));
@@ -507,6 +544,219 @@ public static class MinifigCharacterBuilder
                 // Tufts: the tube swells and shrinks round the ring and round itself
                 float r = 0.027f * (1f + 0.14f * Mathf.Sin(th * 11f) + 0.1f * Mathf.Sin(ph * 3f + th * 7f));
                 vertices.Add(c + (radial * Mathf.Cos(ph) + Vector3.up * Mathf.Sin(ph)) * r);
+            }
+        }
+        for (int i = 0; i < Around; i++)
+            for (int j = 0; j < Tube; j++)
+            {
+                int a = i * Tube + j, b = (i + 1) % Around * Tube + j, c = i * Tube + (j + 1) % Tube, d = (i + 1) % Around * Tube + (j + 1) % Tube;
+                triangles.AddRange(new[] { a, b, c, c, b, d });
+            }
+        var mesh = new Mesh();
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(triangles, 0);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    // ---------------------------------------------------------------- the puffer jacket
+
+    // A puffer is quilted: puffed bands with stitched seams between them, QuiltStep apart (body units). The body hangs
+    // below the waistband to JacketHem, over the top of the jeans; a groove runs down the front where it zips up.
+    const float JacketHem = 0.505f, QuiltStep = 0.04f, SleeveQuiltStep = 0.036f;
+
+    // 0 on a seam, 1 in the middle of a band, round in between (u counts bands)
+    static float Quilt(float u) => Mathf.Pow(Mathf.Sin(Mathf.PI * (u - Mathf.Floor(u))), 0.6f);
+
+    // The body of the jacket: the torso from the hem up, skinned like it, puffed out in horizontal bands
+    static Mesh JacketMesh(Mesh torso)
+    {
+        var cut = ClipInTwo(torso, new Vector3(0f, JacketHem, 0f), Vector3.up);
+        cut.boneWeights = System.Array.ConvertAll(cut.vertices, TorsoWeight);
+        cut.bindposes = new[] { BindPose("Hips"), BindPose("Spine") };
+        return Puffed(cut, new[] { 0 }, 2, (p, n) =>
+        {
+            float puff = 0.009f + 0.011f * Quilt((p.y - JacketHem) / QuiltStep);
+            if (n.z > 0.3f) puff *= Mathf.Lerp(0.3f, 1f, Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.004f, 0.018f, Mathf.Abs(p.x)))); // the zip
+            puff *= Mathf.Lerp(1f, 0.6f, Mathf.Abs(n.x)); // flatter under the arms, which hang against the sides
+            return puff * Mathf.Lerp(0.75f, 1f, Mathf.InverseLerp(JacketHem, JacketHem + 0.012f, p.y)); // a firmer hem
+        });
+    }
+
+    // A sleeve: the whole stitched arm, puffed out in rings along it (shoulder to wrist), nearly flat at the cuff
+    static Mesh SleeveMesh(Mesh arm, string side)
+    {
+        Vector3 shoulder = Joint(side + "UpperArm"), wrist = Joint(side + "Hand");
+        float length = Vector3.Distance(shoulder, wrist);
+        var along = (wrist - shoulder) / length;
+        var all = Enumerable.Range(0, arm.subMeshCount).ToArray();
+        float inward = side == "Left" ? 1f : -1f; // +X is towards the body from the left arm
+        return Puffed(arm, all, 2, (p, n) =>
+        {
+            float s = Vector3.Dot(p - shoulder, along);
+            float puff = 0.006f + 0.008f * Quilt(s / SleeveQuiltStep);
+            puff *= Mathf.Lerp(1f, 0.35f, Mathf.Clamp01(n.x * inward)); // flatter on the side against the body
+            return Mathf.Lerp(0.0015f, puff, Mathf.InverseLerp(length, length - 0.025f, s));
+        });
+    }
+
+    // `source`'s triangles (the submeshes given) as one welded shell, split `subdivisions` times (each triangle into
+    // four) so the quilting has points to show on, then blown out along the smoothed normals by `puff(point, normal)`
+    // body units. An open edge (the hem) is joined back to the body underneath by a band, so the jacket has a thickness
+    // there instead of a gap. Bone weights come across, blended at the new points; the bind poses stay.
+    static Mesh Puffed(Mesh source, int[] submeshes, int subdivisions, System.Func<Vector3, Vector3, float> puff)
+    {
+        var sourceVertices = source.vertices;
+        var sourceWeights = source.boneWeights;
+        var points = new List<Vector3>();
+        var weights = new List<Dictionary<int, float>>();
+        var welded = new Dictionary<Vector3Int, int>();
+        int Weld(int v)
+        {
+            var key = Vector3Int.RoundToInt(sourceVertices[v] * 100000f);
+            if (welded.TryGetValue(key, out int index)) return index;
+            welded[key] = points.Count;
+            points.Add(sourceVertices[v]);
+            weights.Add(Unpack(sourceWeights[v]));
+            return points.Count - 1;
+        }
+        var triangles = new List<int>();
+        foreach (int sub in submeshes)
+        {
+            var t = source.GetTriangles(sub);
+            for (int i = 0; i < t.Length; i += 3)
+            {
+                int a = Weld(t[i]), b = Weld(t[i + 1]), c = Weld(t[i + 2]);
+                if (a != b && b != c && c != a) triangles.AddRange(new[] { a, b, c });
+            }
+        }
+
+        for (int round = 0; round < subdivisions; round++)
+        {
+            var middles = new Dictionary<(int, int), int>();
+            int Middle(int a, int b)
+            {
+                var key = a < b ? (a, b) : (b, a);
+                if (middles.TryGetValue(key, out int index)) return index;
+                middles[key] = points.Count;
+                points.Add((points[a] + points[b]) * 0.5f);
+                var w = new Dictionary<int, float>();
+                foreach (var pair in weights[a]) w[pair.Key] = 0.5f * pair.Value;
+                foreach (var pair in weights[b]) w[pair.Key] = (w.TryGetValue(pair.Key, out float x) ? x : 0f) + 0.5f * pair.Value;
+                weights.Add(w);
+                return points.Count - 1;
+            }
+            var finer = new List<int>(triangles.Count * 4);
+            for (int i = 0; i < triangles.Count; i += 3)
+            {
+                int a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+                int ab = Middle(a, b), bc = Middle(b, c), ca = Middle(c, a);
+                finer.AddRange(new[] { a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca });
+            }
+            triangles = finer;
+        }
+
+        // Smoothed normals (each face's by its area), so the shell swells evenly over the box's edges without cracking
+        var normals = new Vector3[points.Count];
+        for (int i = 0; i < triangles.Count; i += 3)
+        {
+            int a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+            var face = Vector3.Cross(points[b] - points[a], points[c] - points[a]);
+            normals[a] += face; normals[b] += face; normals[c] += face;
+        }
+        var under = new List<Vector3>(points);
+        for (int i = 0; i < points.Count; i++)
+        {
+            var n = normals[i].normalized;
+            points[i] += n * puff(points[i], n);
+        }
+
+        // Open edges: each has one triangle; a band runs from it back down to where the body is
+        var edges = new Dictionary<(int, int), int>();
+        for (int i = 0; i < triangles.Count; i += 3)
+            for (int k = 0; k < 3; k++)
+            {
+                int a = triangles[i + k], b = triangles[i + (k + 1) % 3];
+                var key = a < b ? (a, b) : (b, a);
+                edges[key] = edges.TryGetValue(key, out int count) ? count + 1 : 1;
+            }
+        var inner = new Dictionary<int, int>();
+        int Inner(int v)
+        {
+            if (inner.TryGetValue(v, out int index)) return index;
+            inner[v] = points.Count;
+            points.Add(under[v]);
+            weights.Add(weights[v]);
+            return points.Count - 1;
+        }
+        int faces = triangles.Count;
+        for (int i = 0; i < faces; i += 3)
+            for (int k = 0; k < 3; k++)
+            {
+                int a = triangles[i + k], b = triangles[i + (k + 1) % 3];
+                if (edges[a < b ? (a, b) : (b, a)] != 1) continue;
+                int ia = Inner(a), ib = Inner(b);
+                triangles.AddRange(new[] { b, a, ia, b, ia, ib });
+            }
+
+        var mesh = new Mesh { indexFormat = points.Count > 65000 ? IndexFormat.UInt32 : IndexFormat.UInt16 };
+        mesh.SetVertices(points);
+        mesh.SetTriangles(triangles, 0);
+        mesh.boneWeights = weights.Select(Pack).ToArray();
+        mesh.bindposes = source.bindposes;
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    static Dictionary<int, float> Unpack(BoneWeight w)
+    {
+        var share = new Dictionary<int, float>();
+        void Add(int bone, float weight) { if (weight > 0f) share[bone] = (share.TryGetValue(bone, out float x) ? x : 0f) + weight; }
+        Add(w.boneIndex0, w.weight0); Add(w.boneIndex1, w.weight1); Add(w.boneIndex2, w.weight2); Add(w.boneIndex3, w.weight3);
+        return share;
+    }
+
+    // The four heaviest bones, heaviest first, normalised
+    static BoneWeight Pack(Dictionary<int, float> share)
+    {
+        var top = share.OrderByDescending(pair => pair.Value).Take(4).ToList();
+        float total = top.Sum(pair => pair.Value);
+        var w = new BoneWeight();
+        for (int k = 0; k < top.Count; k++)
+        {
+            int bone = top[k].Key;
+            float weight = top[k].Value / total;
+            switch (k)
+            {
+                case 0: w.boneIndex0 = bone; w.weight0 = weight; break;
+                case 1: w.boneIndex1 = bone; w.weight1 = weight; break;
+                case 2: w.boneIndex2 = bone; w.weight2 = weight; break;
+                default: w.boneIndex3 = bone; w.weight3 = weight; break;
+            }
+        }
+        return w;
+    }
+
+    // The puffer's stand-up collar: one fat tube round the neck, taller than it is thick, dipping a little at the front
+    // (where the chin goes when he looks down), puffed in short segments like the jacket
+    static Mesh PufferCollar(Bounds head)
+    {
+        const int Around = 72, Tube = 16;
+        float rx = head.extents.x + 0.024f, rz = head.extents.z + 0.02f, y0 = head.min.y + 0.02f;
+        var vertices = new List<Vector3>();
+        var triangles = new List<int>();
+        for (int i = 0; i < Around; i++)
+        {
+            float th = i / (float)Around * Mathf.PI * 2f;
+            var radial = new Vector3(Mathf.Sin(th), 0f, Mathf.Cos(th));
+            var c = new Vector3(head.center.x + rx * radial.x, y0 - 0.014f * Mathf.Pow(Mathf.Max(0f, radial.z), 2f), head.center.z + rz * radial.z);
+            float swell = 0.85f + 0.15f * Quilt(th / (Mathf.PI * 2f) * 12f);
+            for (int j = 0; j < Tube; j++)
+            {
+                float ph = j / (float)Tube * Mathf.PI * 2f;
+                vertices.Add(c + (radial * (0.022f * Mathf.Cos(ph)) + Vector3.up * (0.034f * Mathf.Sin(ph))) * swell);
             }
         }
         for (int i = 0; i < Around; i++)
@@ -910,21 +1160,21 @@ public static class MinifigCharacterBuilder
     {
         var mesh = ClipInTwo(torso, new Vector3(0f, Waistband, 0f), Vector3.up);
         var vertices = mesh.vertices;
-        var weights = new BoneWeight[vertices.Length];
-        for (int i = 0; i < vertices.Length; i++)
-        {
-            float spine = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(BendFrom, BendTo, vertices[i].y));
-            // Heavier bone first
-            weights[i] = spine >= 0.5f
-                ? new BoneWeight { boneIndex0 = 1, weight0 = spine, boneIndex1 = 0, weight1 = 1f - spine }
-                : new BoneWeight { boneIndex0 = 0, weight0 = 1f - spine, boneIndex1 = 1, weight1 = spine };
-        }
-        mesh.boneWeights = weights;
+        mesh.boneWeights = System.Array.ConvertAll(vertices, TorsoWeight);
         mesh.uv = PatternUV(vertices);
         // The renderer sits on the character origin scaled to Height; the bones are unrotated and unscaled
         mesh.bindposes = new[] { BindPose("Hips"), BindPose("Spine") };
         mesh.RecalculateBounds();
         return mesh;
+    }
+
+    // Hips (bone 0) below BendFrom, Spine (bone 1) above BendTo, blended between; heavier bone first
+    static BoneWeight TorsoWeight(Vector3 v)
+    {
+        float spine = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(BendFrom, BendTo, v.y));
+        return spine >= 0.5f
+            ? new BoneWeight { boneIndex0 = 1, weight0 = spine, boneIndex1 = 0, weight1 = 1f - spine }
+            : new BoneWeight { boneIndex0 = 0, weight0 = 1f - spine, boneIndex1 = 1, weight1 = spine };
     }
 
     // UVs for a tiled pattern: projected flat from the front (x) with the depth (z) folded in, so the sides get it too
@@ -1012,6 +1262,27 @@ public static class MinifigCharacterBuilder
         }
         material.SetColor("_BaseColor", color);
         material.SetFloat("_Smoothness", 0.3f);
+        material.SetFloat("_Metallic", 0f);
+        material.enableInstancing = true;
+        EditorUtility.SetDirty(material);
+        materials[key] = material;
+        return material;
+    }
+
+    // A puffer's nylon: the colour with a soft sheen, so the light rolls over each puffed band
+    static Material PufferMaterial(Color color)
+    {
+        string key = "Minifig_Puffer_" + ColorUtility.ToHtmlStringRGB(color);
+        if (materials.TryGetValue(key, out var material)) return material;
+        string path = $"{MaterialFolder}/{key}.mat";
+        material = AssetDatabase.LoadAssetAtPath<Material>(path);
+        if (material == null)
+        {
+            material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            AssetDatabase.CreateAsset(material, path);
+        }
+        material.SetColor("_BaseColor", color);
+        material.SetFloat("_Smoothness", 0.55f);
         material.SetFloat("_Metallic", 0f);
         material.enableInstancing = true;
         EditorUtility.SetDirty(material);
