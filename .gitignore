@@ -1,0 +1,26 @@
+# Unity: generated, local or per-machine
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+*.unityproj
+*.tmp
+.vs/
+.vscode/
+.idea/
+.DS_Store
+sysinfo.txt
+crashlytics-build.properties
+# An old zip of Assets (the real Assets are tracked)
+/Assets.zip
