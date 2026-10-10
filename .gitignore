@@ -24,3 +24,5 @@ sysinfo.txt
 crashlytics-build.properties
 # An old zip of Assets (the real Assets are tracked)
 /Assets.zip
+# Unity licence file written by tools/unity.sh while it runs
+/.unity-license/
