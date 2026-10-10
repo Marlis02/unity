@@ -131,6 +131,7 @@ public static class MinifigCharacterBuilder
         public Color? wrists;                   // the wrist rings (fur cuffs on a jacket), default skin
         public Color? collar;                   // a fluffy fur collar round the neck (a winter jacket), or none
         public bool puffer;                     // a quilted puffer jacket (the shirt's colour) over the shirt and sleeves
+        public Color? bowTie;                   // a bow tie under the chin (the bartender), or none
         public bool logo;
         public string logoTexture;              // the chest logo, null for the play logo (LogoPath)
         public string hair;                     // a Tripo hair style (Tripo_Hair_<hair>), or null for none
@@ -180,10 +181,22 @@ public static class MinifigCharacterBuilder
             forearms = Hex("5A3B2A"), wrists = Hex("3A281D"), puffer = true,
             logo = true, hair = RobloxBacon, hairColor = Hex("1F4FD6"), face = RobloxFace.Emotion.Smile, liveFace = true,
         },
+        // Bacon behind the bar (the bartender short): his usual clothes and a red bow tie
+        new Spec
+        {
+            name = "bacon_bartender", skin = Hex("EDEDED"), shirt = Hex("1E1E22"), pants = Hex("25272E"), shoes = Hex("F2F2F2"),
+            logo = true, hair = RobloxBacon, hairColor = Hex("1F4FD6"), face = RobloxFace.Emotion.Smile, liveFace = true, bowTie = Hex("C3202B"),
+        },
+        // The classic Roblox noob, the bartender's customer: bright yellow, a blue torso, green legs, bald
+        new Spec
+        {
+            name = "noob", skin = Hex("F5CD30"), shirt = Hex("0D69AC"), pants = Hex("A4BD47"), shoes = Hex("A4BD47"), sleeves = Hex("F5CD30"),
+            face = RobloxFace.Emotion.Smile, liveFace = true,
+        },
     };
 
     static readonly Dictionary<string, Material> materials = new Dictionary<string, Material>();
-    static Mesh bumpsMesh, collarMesh, pufferBody, pufferLogo, pufferCollar;
+    static Mesh bumpsMesh, collarMesh, pufferBody, pufferLogo, pufferCollar, bowTieMesh;
     static readonly Dictionary<string, Mesh> pufferSleeves = new Dictionary<string, Mesh>();
     const string Dreads = "Dreads";
 
@@ -219,6 +232,7 @@ public static class MinifigCharacterBuilder
                     : RigUtility.StretchTripoHair(spec.hair, body[0].bounds, HairInflate), "Minifig_Hair_" + spec.hair);
         bumpsMesh = SaveMesh(Bumps(body[0]), "Minifig_Bumps");
         collarMesh = SaveMesh(FurCollar(body[0].bounds), "Minifig_FurCollar");
+        bowTieMesh = SaveMesh(BowTie(body[TorsoPart], body[0].bounds), "Minifig_BowTie");
         if (Specs.Any(sp => sp.puffer))
         {
             pufferBody = SaveMesh(JacketMesh(body[TorsoPart]), "Minifig_PufferBody");
@@ -333,6 +347,7 @@ public static class MinifigCharacterBuilder
             logo.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
         }
         if (s.hair != null) Part(bones["Head"], "Hair", hairMeshes[s.hair], HairMaterial(s.hairColor, s.hair == Dreads ? 0.2f : HairSmoothness));
+        if (s.bowTie != null) Part(bones["Spine"], "BowTie", bowTieMesh, PartMaterial(s.bowTie.Value));
         if (s.collar != null)
         {
             var fur = PartMaterial(s.collar.Value);
@@ -552,6 +567,51 @@ public static class MinifigCharacterBuilder
                 int a = i * Tube + j, b = (i + 1) % Around * Tube + j, c = i * Tube + (j + 1) % Tube, d = (i + 1) % Around * Tube + (j + 1) % Tube;
                 triangles.AddRange(new[] { a, b, c, c, b, d });
             }
+        var mesh = new Mesh();
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(triangles, 0);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    // A bow tie on the front of the shirt just under the chin: a knot and two wings flaring out from it, flat-faced
+    static Mesh BowTie(Mesh torso, Bounds head)
+    {
+        var points = torso.vertices;
+        float y = head.min.y - 0.013f;
+        float front = points.Where(p => Mathf.Abs(p.y - y) < 0.02f && Mathf.Abs(p.x) < 0.05f).Select(p => p.z).DefaultIfEmpty(torso.bounds.max.z).Max();
+        var vertices = new List<Vector3>();
+        var triangles = new List<int>();
+        // A block from its 8 corners (back face, then front face, each bottom-left, bottom-right, top-right, top-left)
+        void Block(Vector3[] c)
+        {
+            int[][] faces = { new[] { 0, 3, 2, 1 }, new[] { 4, 5, 6, 7 }, new[] { 0, 1, 5, 4 }, new[] { 3, 7, 6, 2 }, new[] { 0, 4, 7, 3 }, new[] { 1, 2, 6, 5 } };
+            foreach (var f in faces)
+            {
+                int start = vertices.Count;
+                foreach (int i in f) vertices.Add(c[i]);
+                triangles.AddRange(new[] { start, start + 1, start + 2, start, start + 2, start + 3 });
+            }
+        }
+        float z0 = front - 0.002f, z1 = front + 0.011f;
+        Vector3 C(float x, float yy, float z) => new Vector3(x, y + yy, z);
+        foreach (float s in new[] { -1f, 1f })
+        {
+            float xi = s * 0.008f, xo = s * 0.05f;
+            var c = new[]
+            {
+                C(xi, -0.008f, z0), C(xo, -0.025f, z0), C(xo, 0.019f, z0), C(xi, 0.008f, z0),
+                C(xi, -0.008f, z1), C(xo, -0.025f, z1 - 0.003f), C(xo, 0.019f, z1 - 0.003f), C(xi, 0.008f, z1),
+            };
+            if (s < 0f) c = new[] { c[1], c[0], c[3], c[2], c[5], c[4], c[7], c[6] }; // keep the faces outward on the left wing
+            Block(c);
+        }
+        Block(new[]
+        {
+            C(-0.01f, -0.01f, z0 + 0.002f), C(0.01f, -0.01f, z0 + 0.002f), C(0.01f, 0.01f, z0 + 0.002f), C(-0.01f, 0.01f, z0 + 0.002f),
+            C(-0.01f, -0.01f, z1 + 0.003f), C(0.01f, -0.01f, z1 + 0.003f), C(0.01f, 0.01f, z1 + 0.003f), C(-0.01f, 0.01f, z1 + 0.003f),
+        });
         var mesh = new Mesh();
         mesh.SetVertices(vertices);
         mesh.SetTriangles(triangles, 0);

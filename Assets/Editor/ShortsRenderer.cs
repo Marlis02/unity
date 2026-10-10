@@ -17,6 +17,7 @@ using Object = UnityEngine.Object;
 //     [-build MinifigCharacterBuilder.BuildAll,XShortBuilder.Build]   run builders first (no -scene: only that)
 //     [-stills 5.3,7,10.5]   PNG stills at those times (OUTPUT_01_5.30.png ...) instead of the video, to check a change
 //     [-hide PufferJacket,Hair]   objects (by name) left out of the stills, to see what is under them
+//     [-view 2,1.5,-3,0,1.2,0,40]   stills from this camera instead (position, a point it looks at, field of view)
 // A preview is half size (540x960, about two thirds of a second a frame on 4 cores); the final video is 1080x1920.
 public static class ShortsRenderer
 {
@@ -122,6 +123,13 @@ public static class ShortsRenderer
         QualitySettings.SetQualityLevel(QualitySettings.names.Length - 1, true);
         var director = Object.FindFirstObjectByType<PlayableDirector>() ?? throw new InvalidOperationException("No PlayableDirector in " + scenePath);
         var camera = Camera.main ?? throw new InvalidOperationException("No MainCamera in " + scenePath);
+        if (Argument("-view") is string view)
+        {
+            var v = Array.ConvertAll(view.Split(','), x => float.Parse(x, System.Globalization.CultureInfo.InvariantCulture));
+            viewAt = new Vector3(v[0], v[1], v[2]);
+            viewLook = new Vector3(v[3], v[4], v[5]);
+            viewFov = v.Length > 6 ? v[6] : 40f;
+        }
         var hide = (Argument("-hide") ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
         foreach (var t in Object.FindObjectsByType<Transform>(FindObjectsSortMode.None))
             if (Array.IndexOf(hide, t.name) >= 0) t.gameObject.SetActive(false);
@@ -146,10 +154,19 @@ public static class ShortsRenderer
 
     // Every frame here is rendered within one editor frame, where a skinned mesh can keep the matrices it was skinned
     // with (the puffer jacket showed an earlier pose, hiding the logo): they are recalculated at every render
+    static Vector3? viewAt;
+    static Vector3 viewLook;
+    static float viewFov;
+
     static void Frame(PlayableDirector director, Camera camera, double time, Texture2D tex)
     {
         director.time = time;
         director.Evaluate();
+        if (viewAt is Vector3 at)
+        {
+            camera.transform.SetPositionAndRotation(at, Quaternion.LookRotation(viewLook - at));
+            camera.fieldOfView = viewFov;
+        }
         foreach (var skin in Object.FindObjectsByType<SkinnedMeshRenderer>(FindObjectsSortMode.None)) skin.forceMatrixRecalculationPerRender = true;
         foreach (var face in Object.FindObjectsByType<LiveFace>(FindObjectsSortMode.None)) face.Apply();
         camera.Render();
